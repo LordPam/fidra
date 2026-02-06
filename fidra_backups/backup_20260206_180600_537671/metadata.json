@@ -1,0 +1,10 @@
+{
+  "id": "c925afeb-851e-4efd-94c7-766776b98c57",
+  "created_at": "2026-02-06T18:06:00.540666",
+  "db_name": "fidra.db",
+  "db_size": 106496,
+  "attachments_count": 0,
+  "attachments_size": 0,
+  "trigger": "auto_close",
+  "fidra_version": "2.0.0"
+}
