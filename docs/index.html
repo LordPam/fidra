@@ -49,34 +49,56 @@
             <div class="meta-pill">Reports & exports</div>
           </div>
         </div>
-        <div class="hero-panel" aria-hidden="true">
-          <div class="panel-grid">
-            <div class="panel-card large">
-              <div class="panel-title">Balance trajectory</div>
-              <div class="panel-chart">
-                <span style="--bar: 42%"></span>
-                <span style="--bar: 58%"></span>
-                <span style="--bar: 36%"></span>
-                <span style="--bar: 64%"></span>
-                <span style="--bar: 72%"></span>
+        <div class="hero-panel dashboard-preview" aria-hidden="true">
+          <div class="dashboard-metrics">
+            <div class="metric-card accent-income">
+              <div class="metric-title">Current Balance</div>
+              <div class="metric-value">$42,118</div>
+              <div class="metric-sub">Updated today</div>
+            </div>
+            <div class="metric-card accent-expense">
+              <div class="metric-title">Monthly Expenses</div>
+              <div class="metric-value">$9,110</div>
+              <div class="metric-sub">Down 6% vs last month</div>
+            </div>
+            <div class="metric-card accent-neutral">
+              <div class="metric-title">Pending Items</div>
+              <div class="metric-value">3</div>
+              <div class="metric-sub">Awaiting approval</div>
+            </div>
+          </div>
+          <div class="dashboard-main">
+            <div class="chart-card">
+              <div class="chart-title">Balance Trend</div>
+              <div class="chart-canvas">
+                <svg class="chart-svg" viewBox="0 0 240 120" preserveAspectRatio="none">
+                  <path d="M0 90 C40 60 70 72 100 55 C130 36 150 30 180 45 C205 58 230 40 240 32" fill="none" stroke="rgba(74, 111, 165, 0.7)" stroke-width="3" />
+                  <path d="M0 92 C40 70 70 78 100 62 C130 46 150 40 180 50 C205 62 230 46 240 36" fill="none" stroke="rgba(191, 161, 89, 0.6)" stroke-width="2" />
+                </svg>
               </div>
             </div>
-            <div class="panel-card">
-              <div class="panel-title">Income</div>
-              <div class="panel-value positive">$14,280</div>
-              <div class="panel-sub">Last 30 days</div>
-            </div>
-            <div class="panel-card">
-              <div class="panel-title">Expenses</div>
-              <div class="panel-value">$9,110</div>
-              <div class="panel-sub">Tracked & categorized</div>
-            </div>
-            <div class="panel-card wide">
-              <div class="panel-title">Reports ready</div>
-              <div class="panel-sub">Export PDF and CSV in seconds.</div>
-              <div class="panel-chips">
-                <span>PDF</span>
-                <span>CSV</span>
+            <div class="activity-card">
+              <div class="activity-header">Recent Activity</div>
+              <div class="activity-item">
+                <div class="activity-text">
+                  <div class="activity-primary">Membership dues</div>
+                  <div class="activity-secondary">Feb 3, 2026</div>
+                </div>
+                <div class="activity-amount income">+$1,250</div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-text">
+                  <div class="activity-primary">Venue deposit</div>
+                  <div class="activity-secondary">Feb 1, 2026</div>
+                </div>
+                <div class="activity-amount expense">-$680</div>
+              </div>
+              <div class="activity-item">
+                <div class="activity-text">
+                  <div class="activity-primary">Equipment reimbursement</div>
+                  <div class="activity-secondary">Jan 28, 2026</div>
+                </div>
+                <div class="activity-amount income">+$420</div>
               </div>
             </div>
           </div>

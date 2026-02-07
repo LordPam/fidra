@@ -223,92 +223,171 @@ main {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at top right, rgba(74, 111, 165, 0.3), transparent 60%);
+  background: radial-gradient(circle at top right, rgba(74, 111, 165, 0.28), transparent 60%);
   opacity: 0.8;
 }
 
-.panel-grid {
+.dashboard-preview {
   position: relative;
+}
+
+.dashboard-metrics {
+  position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  background-color: #242424;
+  border: 1px solid #333333;
+  border-radius: 12px;
+  padding: 12px 14px;
+  min-height: 72px;
+}
+
+.metric-card.accent-income {
+  border-top: 3px solid #4a6fa5;
+}
+
+.metric-card.accent-expense {
+  border-top: 3px solid #bfa159;
+}
+
+.metric-card.accent-neutral {
+  border-top: 3px solid #888888;
+}
+
+.metric-title {
+  color: #888888;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-value {
+  color: #f8fafc;
+  font-size: 22px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.metric-sub {
+  color: #666666;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.dashboard-main {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
   gap: 16px;
+  margin-top: 16px;
+}
+
+.chart-card {
+  background-color: #242424;
+  border: 1px solid #333333;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.chart-title {
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chart-canvas {
+  margin-top: 10px;
+  height: 140px;
+  background: linear-gradient(180deg, rgba(36, 36, 36, 0.9), rgba(26, 26, 26, 0.9));
+  border-radius: 10px;
+  border: 1px solid #333333;
+  position: relative;
+  overflow: hidden;
+}
+
+.chart-canvas::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(51, 51, 51, 0.8),
+    rgba(51, 51, 51, 0.8) 1px,
+    transparent 1px,
+    transparent 26px
+  );
+  opacity: 0.35;
+}
+
+.chart-svg {
+  position: relative;
+  width: 100%;
+  height: 100%;
   z-index: 1;
 }
 
-.panel-card {
-  background: rgba(36, 36, 36, 0.7);
-  border-radius: 14px;
-  padding: 18px;
-  border: 1px solid rgba(51, 51, 51, 0.9);
+.activity-card {
+  background-color: #242424;
+  border: 1px solid #333333;
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.panel-card.large {
-  grid-column: span 2;
+.activity-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid #333333;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.panel-card.wide {
-  grid-column: span 2;
-}
-
-.panel-title {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: var(--muted);
-  margin-bottom: 12px;
-}
-
-.panel-value {
-  font-size: 1.6rem;
-  font-weight: 700;
-}
-
-.panel-value.positive {
-  color: var(--amber);
-}
-
-.panel-sub {
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.panel-chart {
+.activity-item {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  height: 90px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #333333;
+  transition: background-color 0.2s ease;
 }
 
-.panel-chart span {
-  flex: 1;
-  background: linear-gradient(180deg, var(--accent), rgba(74, 111, 165, 0.2));
-  height: var(--bar);
-  border-radius: 8px 8px 4px 4px;
-  animation: chartPulse 3s ease-in-out infinite alternate;
+.activity-item:last-child {
+  border-bottom: none;
 }
 
-@keyframes chartPulse {
-  0% {
-    opacity: 0.7;
-  }
-  100% {
-    opacity: 1;
-  }
+.activity-item:hover {
+  background-color: #2a2a2a;
 }
 
-.panel-chips {
-  display: flex;
-  gap: 10px;
-  margin-top: 14px;
+.activity-primary {
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.panel-chips span {
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(74, 111, 165, 0.2);
-  color: var(--text);
-  font-size: 0.85rem;
+.activity-secondary {
+  color: #666666;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.activity-amount {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.activity-amount.income {
+  color: #bfa159;
+}
+
+.activity-amount.expense {
+  color: #4a6fa5;
 }
 
 .section-title {
@@ -509,13 +588,12 @@ main {
     padding-top: 60px;
   }
 
-  .panel-grid {
-    grid-template-columns: 1fr;
+  .dashboard-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
 
-  .panel-card.large,
-  .panel-card.wide {
-    grid-column: span 1;
+  .dashboard-main {
+    grid-template-columns: 1fr;
   }
 
   .footer {
