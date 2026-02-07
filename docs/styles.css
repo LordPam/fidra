@@ -227,39 +227,84 @@ main {
   opacity: 0.8;
 }
 
-.dashboard-preview {
+.dash-preview {
   position: relative;
 }
 
-.dashboard-metrics {
+.dash-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 12px;
+  background: #242424;
+  border: 1px solid #333333;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+.dash-logo {
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.03em;
+}
+
+.dash-tabs {
+  display: flex;
+  gap: 14px;
+  color: #8b8b8b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dash-tabs span.active {
+  background: #4a6fa5;
+  color: #ffffff;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
+.dash-controls {
+  margin-left: auto;
+  background: #2a2a2a;
+  border: 1px solid #333333;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.dash-metrics {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+  margin-bottom: 14px;
 }
 
-.metric-card {
+.dash-metric {
   background-color: #242424;
   border: 1px solid #333333;
   border-radius: 12px;
-  padding: 12px 14px;
-  min-height: 72px;
+  padding: 10px 12px;
+  min-height: 68px;
 }
 
-.metric-card.accent-income {
+.dash-metric.accent-blue {
   border-top: 3px solid #4a6fa5;
 }
 
-.metric-card.accent-expense {
+.dash-metric.accent-gold {
   border-top: 3px solid #bfa159;
 }
 
-.metric-card.accent-neutral {
+.dash-metric.accent-amber {
   border-top: 3px solid #888888;
 }
 
-.metric-title {
+.metric-label {
   color: #888888;
   font-size: 11px;
   font-weight: 500;
@@ -269,7 +314,7 @@ main {
 
 .metric-value {
   color: #f8fafc;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   margin-top: 4px;
 }
@@ -280,36 +325,44 @@ main {
   margin-top: 2px;
 }
 
-.dashboard-main {
+.dash-row {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
-.chart-card {
+.dash-row.wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dash-card {
   background-color: #242424;
   border: 1px solid #333333;
   border-radius: 12px;
   padding: 12px;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
 }
 
-.chart-title {
+.card-title {
   color: #e2e8f0;
   font-size: 12px;
   font-weight: 600;
+  margin-bottom: 8px;
 }
 
 .chart-canvas {
-  margin-top: 10px;
-  height: 140px;
+  flex: 1;
   background: linear-gradient(180deg, rgba(36, 36, 36, 0.9), rgba(26, 26, 26, 0.9));
   border-radius: 10px;
   border: 1px solid #333333;
   position: relative;
   overflow: hidden;
+  min-height: 140px;
 }
 
 .chart-canvas::after {
@@ -326,6 +379,37 @@ main {
   opacity: 0.35;
 }
 
+.chart-canvas.bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+}
+
+.chart-canvas.bars::after {
+  opacity: 0.25;
+}
+
+.bar-group {
+  display: flex;
+  gap: 6px;
+  align-items: end;
+  height: 100%;
+}
+
+.bar-group span {
+  width: 10px;
+  background: rgba(191, 161, 89, 0.8);
+  height: var(--bar);
+  border-radius: 6px 6px 2px 2px;
+}
+
+.bar-group span:last-child {
+  background: rgba(74, 111, 165, 0.8);
+}
+
 .chart-svg {
   position: relative;
   width: 100%;
@@ -333,60 +417,50 @@ main {
   z-index: 1;
 }
 
-.activity-card {
-  background-color: #242424;
-  border: 1px solid #333333;
-  border-radius: 12px;
-  overflow: hidden;
+.empty-card {
+  justify-content: center;
+  align-items: center;
 }
 
-.activity-header {
-  padding: 10px 12px;
-  border-bottom: 1px solid #333333;
-  color: #e2e8f0;
+.empty-state {
+  color: #666666;
   font-size: 12px;
-  font-weight: 600;
 }
 
-.activity-item {
+.list-card {
+  padding-bottom: 6px;
+}
+
+.list-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 10px 0;
   border-bottom: 1px solid #333333;
-  transition: background-color 0.2s ease;
 }
 
-.activity-item:last-child {
+.list-item:last-child {
   border-bottom: none;
 }
 
-.activity-item:hover {
-  background-color: #2a2a2a;
-}
-
-.activity-primary {
+.item-title {
   color: #e2e8f0;
   font-size: 12px;
   font-weight: 500;
 }
 
-.activity-secondary {
+.item-sub {
   color: #666666;
   font-size: 10px;
   margin-top: 2px;
 }
 
-.activity-amount {
+.item-amount {
   font-size: 12px;
   font-weight: 600;
 }
 
-.activity-amount.income {
-  color: #bfa159;
-}
-
-.activity-amount.expense {
+.item-amount.expense {
   color: #4a6fa5;
 }
 
@@ -588,11 +662,25 @@ main {
     padding-top: 60px;
   }
 
-  .dashboard-metrics {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  .dash-top {
+    flex-wrap: wrap;
   }
 
-  .dashboard-main {
+  .dash-tabs {
+    flex-wrap: wrap;
+  }
+
+  .dash-controls {
+    width: 100%;
+    text-align: left;
+  }
+
+  .dash-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dash-row,
+  .dash-row.wide {
     grid-template-columns: 1fr;
   }
 

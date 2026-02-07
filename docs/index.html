@@ -49,56 +49,112 @@
             <div class="meta-pill">Reports & exports</div>
           </div>
         </div>
-        <div class="hero-panel dashboard-preview" aria-hidden="true">
-          <div class="dashboard-metrics">
-            <div class="metric-card accent-income">
-              <div class="metric-title">Current Balance</div>
-              <div class="metric-value">$42,118</div>
-              <div class="metric-sub">Updated today</div>
+        <div class="hero-panel dash-preview" aria-hidden="true">
+          <div class="dash-top">
+            <div class="dash-logo">Fidra</div>
+            <div class="dash-tabs">
+              <span class="active">Dashboard</span>
+              <span>Transactions</span>
+              <span>Planned</span>
+              <span>Reports</span>
             </div>
-            <div class="metric-card accent-expense">
-              <div class="metric-title">Monthly Expenses</div>
-              <div class="metric-value">$9,110</div>
-              <div class="metric-sub">Down 6% vs last month</div>
+            <div class="dash-controls">All Sheets</div>
+          </div>
+          <div class="dash-metrics">
+            <div class="dash-metric accent-blue">
+              <div class="metric-label">Current Balance</div>
+              <div class="metric-value">£1,963.72</div>
+              <div class="metric-sub">FY 2026</div>
             </div>
-            <div class="metric-card accent-neutral">
-              <div class="metric-title">Pending Items</div>
-              <div class="metric-value">3</div>
-              <div class="metric-sub">Awaiting approval</div>
+            <div class="dash-metric accent-gold">
+              <div class="metric-label">This Month</div>
+              <div class="metric-value">£-1,661.92</div>
+              <div class="metric-sub">Net for February 2026</div>
+            </div>
+            <div class="dash-metric accent-amber">
+              <div class="metric-label">Monthly Income</div>
+              <div class="metric-value">£244.00</div>
+              <div class="metric-sub">3 transactions</div>
+            </div>
+            <div class="dash-metric accent-blue">
+              <div class="metric-label">Monthly Expenses</div>
+              <div class="metric-value">£1,905.92</div>
+              <div class="metric-sub">4 transactions</div>
             </div>
           </div>
-          <div class="dashboard-main">
-            <div class="chart-card">
-              <div class="chart-title">Balance Trend</div>
+          <div class="dash-row">
+            <div class="dash-card chart-card">
+              <div class="card-title">Balance Trend (90 days)</div>
               <div class="chart-canvas">
                 <svg class="chart-svg" viewBox="0 0 240 120" preserveAspectRatio="none">
-                  <path d="M0 90 C40 60 70 72 100 55 C130 36 150 30 180 45 C205 58 230 40 240 32" fill="none" stroke="rgba(74, 111, 165, 0.7)" stroke-width="3" />
-                  <path d="M0 92 C40 70 70 78 100 62 C130 46 150 40 180 50 C205 62 230 46 240 36" fill="none" stroke="rgba(191, 161, 89, 0.6)" stroke-width="2" />
+                  <path d="M0 70 C20 40 40 48 60 34 C80 22 100 28 120 42 C140 58 160 45 180 30 C200 20 220 34 240 26" fill="none" stroke="rgba(74, 111, 165, 0.85)" stroke-width="3" />
+                  <path d="M0 92 C40 90 80 90 120 90 C160 90 200 90 240 90" fill="none" stroke="rgba(74, 111, 165, 0.35)" stroke-width="2" stroke-dasharray="4 6" />
                 </svg>
               </div>
             </div>
-            <div class="activity-card">
-              <div class="activity-header">Recent Activity</div>
-              <div class="activity-item">
-                <div class="activity-text">
-                  <div class="activity-primary">Membership dues</div>
-                  <div class="activity-secondary">Feb 3, 2026</div>
+            <div class="dash-card chart-card">
+              <div class="card-title">Income vs Expenses</div>
+              <div class="chart-canvas bars">
+                <div class="bar-group">
+                  <span style="--bar: 52%"></span>
+                  <span style="--bar: 28%"></span>
                 </div>
-                <div class="activity-amount income">+$1,250</div>
+                <div class="bar-group">
+                  <span style="--bar: 74%"></span>
+                  <span style="--bar: 58%"></span>
+                </div>
+                <div class="bar-group">
+                  <span style="--bar: 38%"></span>
+                  <span style="--bar: 46%"></span>
+                </div>
+                <div class="bar-group">
+                  <span style="--bar: 44%"></span>
+                  <span style="--bar: 32%"></span>
+                </div>
+                <div class="bar-group">
+                  <span style="--bar: 28%"></span>
+                  <span style="--bar: 22%"></span>
+                </div>
               </div>
-              <div class="activity-item">
-                <div class="activity-text">
-                  <div class="activity-primary">Venue deposit</div>
-                  <div class="activity-secondary">Feb 1, 2026</div>
+            </div>
+            <div class="dash-card empty-card">
+              <div class="card-title">Pending Approvals</div>
+              <div class="empty-state">No pending transactions</div>
+            </div>
+          </div>
+          <div class="dash-row wide">
+            <div class="dash-card list-card">
+              <div class="card-title">Recent Transactions</div>
+              <div class="list-item">
+                <div>
+                  <div class="item-title">Van fuel refund</div>
+                  <div class="item-sub">Feb 05, 2026</div>
                 </div>
-                <div class="activity-amount expense">-$680</div>
+                <div class="item-amount expense">-£49.25</div>
               </div>
-              <div class="activity-item">
-                <div class="activity-text">
-                  <div class="activity-primary">Equipment reimbursement</div>
-                  <div class="activity-secondary">Jan 28, 2026</div>
+              <div class="list-item">
+                <div>
+                  <div class="item-title">Trip accommodation payment</div>
+                  <div class="item-sub">Feb 05, 2026</div>
                 </div>
-                <div class="activity-amount income">+$420</div>
+                <div class="item-amount expense">-£239.40</div>
+              </div>
+            </div>
+            <div class="dash-card list-card">
+              <div class="card-title">Upcoming Planned</div>
+              <div class="list-item">
+                <div>
+                  <div class="item-title">Trip accommodation refund</div>
+                  <div class="item-sub">Feb 10, 2026</div>
+                </div>
+                <div class="item-amount expense">-£64.00</div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <div class="item-title">Drysuit hire</div>
+                  <div class="item-sub">Feb 10, 2026</div>
+                </div>
+                <div class="item-amount expense">-£192.00</div>
               </div>
             </div>
           </div>
