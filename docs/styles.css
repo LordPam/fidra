@@ -1,16 +1,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;600;700&family=Space+Grotesk:wght@400;500;700&display=swap');
 
 :root {
-  --bg: #171a19;
-  --bg-soft: #1f2220;
-  --card: #272a28;
-  --card-strong: #2d302e;
-  --text: #e5e7eb;
-  --muted: #9ca3af;
+  --bg: #1a1a1a;
+  --bg-soft: #1f2222;
+  --panel: #242424;
+  --panel-strong: #2a2a2a;
+  --text: #e2e8f0;
+  --muted: #8b8b8b;
   --accent: #4a6fa5;
   --accent-strong: #23395b;
   --gold: #bfa159;
-  --stroke: #3f4240;
+  --amber: #f59e0b;
+  --mist: #b8c4d8;
+  --stroke: #333333;
   --glow: rgba(74, 111, 165, 0.35);
   --glow-soft: rgba(191, 161, 89, 0.2);
   --radius: 18px;
@@ -23,8 +25,9 @@
 body {
   margin: 0;
   font-family: 'Manrope', system-ui, sans-serif;
-  background: radial-gradient(circle at top left, #202524 0%, #141716 60%)
-    fixed;
+  background: radial-gradient(circle at top left, #242424 0%, #151515 60%)
+      fixed,
+    linear-gradient(180deg, #1a1a1a 0%, #121212 100%);
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
@@ -48,13 +51,18 @@ a {
   pointer-events: none;
   background: radial-gradient(
       circle at 15% 20%,
-      rgba(74, 111, 165, 0.25),
+      rgba(74, 111, 165, 0.28),
       transparent 55%
     ),
     radial-gradient(
       circle at 80% 0%,
-      rgba(191, 161, 89, 0.18),
-      transparent 45%
+      rgba(191, 161, 89, 0.16),
+      transparent 50%
+    ),
+    radial-gradient(
+      circle at 70% 80%,
+      rgba(248, 250, 252, 0.08),
+      transparent 55%
     );
   mix-blend-mode: screen;
   animation: ambientShift 18s ease-in-out infinite alternate;
@@ -78,9 +86,9 @@ a {
   align-items: center;
   justify-content: space-between;
   padding: 20px 8vw;
-  background: rgba(23, 26, 25, 0.7);
+  background: rgba(26, 26, 26, 0.75);
   backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(63, 66, 64, 0.6);
+  border-bottom: 1px solid rgba(51, 51, 51, 0.8);
 }
 
 .logo {
@@ -92,8 +100,10 @@ a {
 }
 
 .logo img {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: auto;
+  max-height: 40px;
+  object-fit: contain;
 }
 
 .nav-links {
@@ -111,7 +121,7 @@ a {
   padding: 10px 18px;
   border-radius: 999px;
   background: linear-gradient(120deg, var(--accent), var(--gold));
-  color: #0e1110;
+  color: #111111;
   font-weight: 600;
 }
 
@@ -170,14 +180,14 @@ main {
 
 .btn.primary {
   background: linear-gradient(120deg, var(--accent), var(--gold));
-  color: #0f1211;
+  color: #111111;
   box-shadow: 0 8px 24px rgba(74, 111, 165, 0.25);
 }
 
 .btn.ghost {
   border-color: var(--stroke);
   color: var(--text);
-  background: rgba(39, 42, 40, 0.6);
+  background: rgba(36, 36, 36, 0.6);
 }
 
 .btn:hover {
@@ -200,11 +210,11 @@ main {
 }
 
 .hero-panel {
-  background: linear-gradient(160deg, rgba(39, 42, 40, 0.9), rgba(23, 26, 25, 0.7));
+  background: linear-gradient(160deg, rgba(36, 36, 36, 0.95), rgba(26, 26, 26, 0.8));
   border: 1px solid var(--stroke);
   border-radius: var(--radius);
   padding: 24px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   position: relative;
   overflow: hidden;
 }
@@ -226,10 +236,10 @@ main {
 }
 
 .panel-card {
-  background: rgba(31, 34, 32, 0.7);
+  background: rgba(36, 36, 36, 0.7);
   border-radius: 14px;
   padding: 18px;
-  border: 1px solid rgba(63, 66, 64, 0.8);
+  border: 1px solid rgba(51, 51, 51, 0.9);
 }
 
 .panel-card.large {
@@ -254,7 +264,7 @@ main {
 }
 
 .panel-value.positive {
-  color: #6ee7b7;
+  color: var(--amber);
 }
 
 .panel-sub {
@@ -327,7 +337,7 @@ main {
 }
 
 .download-card {
-  background: var(--card);
+  background: var(--panel);
   border-radius: var(--radius);
   padding: 22px;
   border: 1px solid var(--stroke);
@@ -350,7 +360,7 @@ main {
 
 .download-card:hover {
   transform: translateY(-4px);
-  border-color: rgba(191, 161, 89, 0.6);
+  border-color: rgba(191, 161, 89, 0.55);
 }
 
 .download-card:hover::after {
@@ -361,7 +371,7 @@ main {
   width: 52px;
   height: 52px;
   border-radius: 16px;
-  background: rgba(74, 111, 165, 0.2);
+  background: rgba(74, 111, 165, 0.25);
   display: grid;
   place-items: center;
   color: var(--text);
@@ -407,7 +417,7 @@ main {
 }
 
 .feature-card {
-  background: var(--card-strong);
+  background: var(--panel-strong);
   border-radius: 16px;
   border: 1px solid var(--stroke);
   padding: 22px;
@@ -424,7 +434,7 @@ main {
 }
 
 .cta-card {
-  background: linear-gradient(120deg, rgba(74, 111, 165, 0.35), rgba(31, 34, 32, 0.7));
+  background: linear-gradient(120deg, rgba(74, 111, 165, 0.35), rgba(36, 36, 36, 0.8));
   border-radius: 24px;
   padding: 32px;
   border: 1px solid rgba(74, 111, 165, 0.4);
@@ -450,7 +460,7 @@ main {
 }
 
 .faq details {
-  background: var(--card);
+  background: var(--panel);
   border-radius: 14px;
   border: 1px solid var(--stroke);
   padding: 16px 18px;
