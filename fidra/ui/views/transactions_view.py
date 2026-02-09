@@ -878,7 +878,13 @@ class TransactionsView(QWidget):
         try:
             # Create updated versions with APPROVED status
             old_states = transactions
-            new_states = [t.with_updates(status=ApprovalStatus.APPROVED) for t in transactions]
+
+            # Check if we should also set date to today
+            updates = {"status": ApprovalStatus.APPROVED}
+            if self._context.settings.transactions.date_on_approve:
+                updates["date"] = date.today()
+
+            new_states = [t.with_updates(**updates) for t in transactions]
 
             # Create bulk edit command
             command = BulkEditCommand(
@@ -961,7 +967,12 @@ class TransactionsView(QWidget):
                 else:
                     status = ApprovalStatus.PENDING
 
-                actual_transaction = planned_trans.with_updates(status=status)
+                # Build updates - optionally set date to today on conversion
+                updates = {"status": status}
+                if self._context.settings.transactions.date_on_planned_conversion:
+                    updates["date"] = date.today()
+
+                actual_transaction = planned_trans.with_updates(**updates)
 
                 # Save actual transaction
                 command = AddTransactionCommand(

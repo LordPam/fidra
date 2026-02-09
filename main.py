@@ -7,6 +7,7 @@ and launches the main window.
 
 import asyncio
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import qasync
@@ -17,32 +18,56 @@ from PySide6.QtWidgets import QApplication
 from fidra.app import ApplicationContext
 from fidra.state.persistence import SettingsStore
 from fidra.ui.main_window import MainWindow
+from fidra.ui.window_manager import WindowManager
 from fidra.ui.dialogs.setup_wizard import SetupWizard
+from fidra.ui.dialogs.file_chooser import FileChooserDialog
 
 
-async def async_main(ctx: ApplicationContext) -> None:
-    """Initialize async components.
+def should_restore_last_file(settings_store: SettingsStore) -> tuple[bool, Path | None]:
+    """Check if we should restore the last opened file.
 
-    Args:
-        ctx: Application context
+    Returns (should_restore, file_path) where should_restore is True if:
+    - Settings file exists
+    - last_file exists on disk
+    - last_opened_at is within 24 hours (or missing for backward compatibility)
     """
-    print("Initializing Fidra...")
-    await ctx.initialize()
-    print(f"Database: {ctx.db_path}")
-    print(f"Loaded {len(ctx.state.transactions.value)} transactions")
-    print(f"Loaded {len(ctx.state.sheets.value)} sheets")
-    print("Fidra is ready!")
+    if not settings_store.exists():
+        return False, None
+
+    settings = settings_store.load()
+    last_file = settings.storage.last_file
+    last_opened_at = settings.storage.last_opened_at
+
+    if not last_file or not last_file.exists():
+        return False, None
+
+    # Backward compatibility: if no timestamp, restore anyway (first time with new field)
+    if not last_opened_at:
+        return True, last_file
+
+    try:
+        opened_time = datetime.fromisoformat(last_opened_at)
+        if datetime.now() - opened_time < timedelta(hours=24):
+            return True, last_file
+    except (ValueError, TypeError):
+        # Invalid timestamp format - restore anyway
+        return True, last_file
+
+    return False, None
 
 
-async def async_cleanup(ctx: ApplicationContext) -> None:
-    """Clean up async components.
-
-    Args:
-        ctx: Application context
-    """
-    print("Closing database connections...")
-    await ctx.close()
+async def async_cleanup(window_manager: WindowManager) -> None:
+    """Clean up all windows and resources."""
+    print("Closing all windows...")
+    await window_manager.close_all_windows()
     print("Goodbye!")
+
+
+def _get_resource_path(relative_path: str) -> Path:
+    """Resolve resource paths for bundled and dev runs."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).resolve().parent / relative_path
 
 
 def run() -> None:
@@ -52,76 +77,117 @@ def run() -> None:
     app.setApplicationName("Fidra")
     app.setOrganizationName("Fidra")
 
-    # Set window icon (only needed for development - bundled app uses .icns from bundle)
-    # Check if running from PyInstaller bundle
+    # Set window icon (avoid overriding macOS .icns)
     is_bundled = getattr(sys, 'frozen', False)
-    if not is_bundled:
-        # Development mode - load icon from source
-        icon_path = Path(__file__).resolve().parent / "fidra" / "ui" / "theme" / "icons" / "icon.svg"
+    if sys.platform == "win32":
+        icon_path = _get_resource_path("fidra/resources/icons/fidra.ico")
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
+    elif not is_bundled and sys.platform != "darwin":
+        icon_path = _get_resource_path("fidra/ui/theme/icons/icon.svg")
         if icon_path.exists():
             app.setWindowIcon(QIcon(str(icon_path)))
 
-    # Check for first run (no settings file exists)
+    # Check settings state
     settings_store = SettingsStore()
     is_first_run = not settings_store.exists()
 
-    # Determine database path: command line arg > wizard > last opened > default
+    # Determine database path
     db_path = None
-    wizard_name = None
-    wizard_initials = None
+    show_wizard = False
 
+    # Priority 1: Command line argument
     if len(sys.argv) > 1:
-        # Command line argument takes priority
         db_path = Path(sys.argv[1])
         if not db_path.exists():
-            print(f"Warning: Database file not found: {db_path}")
+            print(f"Warning: File not found: {db_path}")
             db_path = None
 
-    # Show setup wizard on first run (if no command line arg)
-    if is_first_run and db_path is None:
+    # Priority 2: Check if we should restore last file (within 24 hours)
+    last_file_for_chooser = None
+    if db_path is None and not is_first_run:
+        should_restore, last_file = should_restore_last_file(settings_store)
+        if should_restore:
+            print(f"Restoring recent file: {last_file}")
+            db_path = last_file
+        else:
+            # Last file is stale (>24 hours) - show file chooser (not wizard)
+            # Keep track of last file to offer as option
+            settings = settings_store.load()
+            last_file_for_chooser = settings.storage.last_file
+
+    # Priority 3: First run - show setup wizard
+    if db_path is None and is_first_run:
         wizard = SetupWizard()
         if wizard.exec():
             db_path = wizard.db_path
-            wizard_name = wizard.user_name
-            wizard_initials = wizard.user_initials
+
+            # Save wizard settings
+            temp_settings = settings_store.load()
+            if wizard.user_name:
+                temp_settings.profile.name = wizard.user_name
+                temp_settings.profile.initials = wizard.user_initials or ""
+                temp_settings.profile.first_run_complete = True
+            temp_settings.storage.last_file = db_path
+            temp_settings.storage.last_opened_at = datetime.now().isoformat()
+            settings_store.save(temp_settings)
         else:
-            # User cancelled setup wizard - exit
+            # User cancelled - exit
+            sys.exit(0)
+
+    # Priority 4: Returning user with stale file - show file chooser
+    if db_path is None and not is_first_run:
+        chooser = FileChooserDialog(last_file=last_file_for_chooser)
+        if chooser.exec():
+            db_path = chooser.db_path
+            # Update settings with new file
+            temp_settings = settings_store.load()
+            temp_settings.storage.last_file = db_path
+            temp_settings.storage.last_opened_at = datetime.now().isoformat()
+            settings_store.save(temp_settings)
+        else:
+            # User cancelled - exit
             sys.exit(0)
 
     # Set up qasync event loop
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
-    # Create application context
-    ctx = ApplicationContext(db_path=db_path)
+    # Create window manager
+    window_manager = WindowManager(settings_store)
 
-    # Apply wizard profile settings if from first run
-    if wizard_name:
-        ctx.settings.profile.name = wizard_name
-        ctx.settings.profile.initials = wizard_initials or ""
-        ctx.settings.profile.first_run_complete = True
-        if db_path:
-            ctx.settings.storage.last_file = db_path
-        ctx.save_settings()
+    # Connect window manager signals
+    def on_all_windows_closed():
+        # On macOS, app typically stays open. On other platforms, quit.
+        if sys.platform != 'darwin':
+            app.quit()
 
-    # If no db_path specified, try to use last opened file from settings
-    if db_path is None and ctx.settings.storage.last_file:
-        last_file = ctx.settings.storage.last_file
-        if last_file.exists():
-            print(f"Restoring last database: {last_file}")
-            ctx._db_path = last_file
+    window_manager.all_windows_closed.connect(on_all_windows_closed)
 
     with loop:
         try:
-            # Initialize async components
-            loop.run_until_complete(async_main(ctx))
+            # Create initial window
+            success = window_manager.create_window(db_path=db_path, loop=loop)
 
-            # Create and show main window
-            window = MainWindow(ctx)
-            window.show()
+            # If initial window failed (e.g., invalid database), show file chooser
+            if not success:
+                chooser = FileChooserDialog(last_file=None)
+                if chooser.exec():
+                    db_path = chooser.db_path
+                    temp_settings = settings_store.load()
+                    temp_settings.storage.last_file = db_path
+                    temp_settings.storage.last_opened_at = datetime.now().isoformat()
+                    settings_store.save(temp_settings)
+                    success = window_manager.create_window(db_path=db_path, loop=loop)
 
-            # Check for empty database and prompt opening balance after window is visible
-            QTimer.singleShot(0, window.check_opening_balance)
+                if not success:
+                    # Still failed or user cancelled - exit
+                    sys.exit(0)
+
+            # Check for empty database on first window
+            if window_manager.window_count > 0:
+                first_window = window_manager._windows[0][0]
+                QTimer.singleShot(0, first_window.check_opening_balance)
 
             # Run Qt event loop (blocks until app quits)
             loop.run_forever()
@@ -129,8 +195,8 @@ def run() -> None:
         except KeyboardInterrupt:
             print("\nShutting down...")
         finally:
-            # Cleanup async components
-            loop.run_until_complete(async_cleanup(ctx))
+            # Cleanup all windows
+            loop.run_until_complete(async_cleanup(window_manager))
             loop.close()
 
 

@@ -4,6 +4,7 @@ The ApplicationContext wires together all application components
 and provides them to the UI layer.
 """
 
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -206,8 +207,9 @@ class ApplicationContext:
         # Restart file watcher for new database
         self.file_watcher.start_watching(self._db_path)
 
-        # Save last opened file path to settings
+        # Save last opened file path and timestamp to settings
         self.settings.storage.last_file = new_path
+        self.settings.storage.last_opened_at = datetime.now().isoformat()
         self.save_settings()
 
     @property

@@ -32,6 +32,7 @@ class StorageSettings(BaseModel):
 
     backend: str = Field(default="sqlite", pattern="^(sqlite|excel)$")
     last_file: Optional[Path] = None
+    last_opened_at: Optional[str] = None  # ISO format datetime string
 
     model_config = {"validate_assignment": True}
 
@@ -72,6 +73,18 @@ class BackupSettings(BaseModel):
     model_config = {"validate_assignment": True}
 
 
+class TransactionSettings(BaseModel):
+    """Transaction behavior settings."""
+
+    # When approving a transaction, set its date to today
+    date_on_approve: bool = False
+
+    # When converting a planned transaction to actual, set its date to today
+    date_on_planned_conversion: bool = True
+
+    model_config = {"validate_assignment": True}
+
+
 class FinancialYearSettings(BaseModel):
     """Financial year configuration.
 
@@ -104,6 +117,7 @@ class AppSettings(BaseModel):
     financial_year: FinancialYearSettings = Field(default_factory=FinancialYearSettings)
     ui_state: UIStateSettings = Field(default_factory=UIStateSettings)
     backup: BackupSettings = Field(default_factory=BackupSettings)
+    transactions: TransactionSettings = Field(default_factory=TransactionSettings)
 
     income_categories: list[str] = Field(
         default_factory=lambda: [

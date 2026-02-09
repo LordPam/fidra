@@ -696,7 +696,14 @@ class DashboardView(QWidget):
         """Approve or reject a pending transaction."""
         try:
             old_states = [transaction]
-            new_states = [transaction.with_updates(status=status)]
+
+            # Build updates - optionally set date to today on approval
+            updates = {"status": status}
+            if (status == ApprovalStatus.APPROVED and
+                    self._context.settings.transactions.date_on_approve):
+                updates["date"] = date.today()
+
+            new_states = [transaction.with_updates(**updates)]
             command = BulkEditCommand(
                 self._context.transaction_repo,
                 old_states,

@@ -1,5 +1,6 @@
 """Main application window with tab-based navigation."""
 
+import asyncio
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
@@ -40,6 +41,7 @@ from fidra.ui.dialogs.financial_year_dialog import FinancialYearDialog
 from fidra.ui.dialogs.manage_categories_dialog import ManageCategoriesDialog
 from fidra.ui.dialogs.opening_balance_dialog import OpeningBalanceDialog
 from fidra.ui.dialogs.profile_dialog import ProfileDialog
+from fidra.ui.dialogs.transaction_settings_dialog import TransactionSettingsDialog
 from fidra.ui.components.notification_banner import NotificationBanner
 
 
@@ -61,15 +63,17 @@ class MainWindow(QMainWindow):
 
     view_changed = Signal(int)  # Emitted when navigation changes
 
-    def __init__(self, context: "ApplicationContext"):
+    def __init__(self, context: "ApplicationContext", window_manager=None):
         """Initialize main window.
 
         Args:
             context: Application context providing dependencies
+            window_manager: Optional WindowManager for multi-window support
         """
         super().__init__()
         self._ctx = context
         self._state = context.state
+        self._window_manager = window_manager
 
         # Apply theme before setting up UI - restore from settings
         self._theme_engine = get_theme_engine()
@@ -375,6 +379,12 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
+        # Window actions (only if window manager is available)
+        if self._window_manager:
+            new_window_action = menu.addAction("New Window...")
+            new_window_action.triggered.connect(self._new_window)
+            menu.addSeparator()
+
         # Database actions
         open_action = menu.addAction("Open Database...")
         open_action.triggered.connect(self._open_database)
@@ -397,6 +407,10 @@ class MainWindow(QMainWindow):
         # Category management
         categories_action = menu.addAction("Manage Categories...")
         categories_action.triggered.connect(self._show_manage_categories)
+
+        # Transaction behavior settings
+        transaction_settings_action = menu.addAction("Transaction Behavior...")
+        transaction_settings_action.triggered.connect(self._show_transaction_settings)
 
         menu.addSeparator()
 
@@ -433,6 +447,11 @@ class MainWindow(QMainWindow):
         dialog = FinancialYearDialog(self._ctx, self)
         dialog.exec()
 
+    def _show_transaction_settings(self) -> None:
+        """Show the transaction behavior settings dialog."""
+        dialog = TransactionSettingsDialog(self._ctx, self)
+        dialog.exec()
+
     def _show_audit_log(self) -> None:
         """Show the audit log viewer dialog."""
         dialog = AuditLogDialog(self._ctx, self)
@@ -445,7 +464,7 @@ class MainWindow(QMainWindow):
             self,
             "Open Database",
             str(Path.home()),
-            "SQLite Database (*.db);;All Files (*)"
+            "All Databases (*.fdra *.db);;Fidra Files (*.fdra);;Legacy Database (*.db);;All Files (*)"
         )
 
         if file_path:
@@ -465,15 +484,15 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "New Database",
-            str(Path.home() / "fidra.db"),
-            "SQLite Database (*.db);;All Files (*)"
+            str(Path.home() / "finances.fdra"),
+            "Fidra Files (*.fdra);;All Files (*)"
         )
 
         if file_path:
             path = Path(file_path)
-            # Ensure .db extension
+            # Ensure .fdra extension
             if not path.suffix:
-                path = path.with_suffix('.db')
+                path = path.with_suffix('.fdra')
 
             self.status_bar.showMessage(f"Creating {path.name}...")
             try:
@@ -723,3 +742,41 @@ class MainWindow(QMainWindow):
                     self.status_bar.showMessage("Opening balance set", 3000)
                 except Exception as e:
                     self.status_bar.showMessage(f"Error saving opening balance: {e}", 5000)
+
+    def _new_window(self) -> None:
+        """Open a new window by selecting a file."""
+        if not self._window_manager:
+            return
+
+        # Show file dialog directly
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Database in New Window",
+            str(Path.home()),
+            "All Databases (*.fdra *.db);;Fidra Files (*.fdra);;Legacy Database (*.db);;All Files (*)"
+        )
+
+        if file_path:
+            path = Path(file_path)
+            if path.exists():
+                # Check if already open
+                if self._window_manager.is_file_open(path):
+                    self._window_manager.focus_window_for_file(path)
+                else:
+                    # Create window asynchronously
+                    asyncio.create_task(self._window_manager.create_window_async(path))
+
+    def closeEvent(self, event) -> None:
+        """Handle window close event.
+
+        If using window manager, notify it and let it handle cleanup.
+        Otherwise, accept the close and let the app quit.
+        """
+        if self._window_manager:
+            # Save UI state before closing
+            self._ctx.save_ui_state()
+
+            # Notify window manager
+            self._window_manager.close_window(self)
+
+        event.accept()

@@ -17,6 +17,7 @@ from fidra.data.sqlite_repo import (
     SQLiteSheetRepository,
     SQLiteTransactionRepository,
 )
+from fidra.data.validation import DatabaseValidationError, validate_database
 
 
 async def create_repositories(
@@ -37,6 +38,7 @@ async def create_repositories(
 
     Raises:
         ValueError: If backend is unknown
+        DatabaseValidationError: If database file is not compatible
 
     Example:
         >>> trans_repo, planned_repo, sheet_repo, audit_repo = await create_repositories(
@@ -44,6 +46,8 @@ async def create_repositories(
         ... )
     """
     if backend == "sqlite":
+        # Validate database before connecting
+        validate_database(file_path)
         trans_repo = SQLiteTransactionRepository(file_path)
         await trans_repo.connect()
 

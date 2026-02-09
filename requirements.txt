@@ -1,0 +1,25 @@
+# Fidra dependencies
+# Install with: pip install -r requirements.txt
+
+# Core GUI
+pyside6>=6.6.0
+qasync>=0.27.0
+pyqtgraph>=0.13.0
+
+# Data & validation
+pydantic>=2.5.0
+aiosqlite>=0.19.0
+openpyxl>=3.1.0
+python-dateutil>=2.8.0
+
+# PDF & reporting
+reportlab>=4.0.0
+svglib>=0.9.0
+markdown>=3.5.0
+
+# File watching
+watchdog>=3.0.0
+
+# Build tools (for creating executables)
+pyinstaller>=6.0.0
+pillow>=10.0.0

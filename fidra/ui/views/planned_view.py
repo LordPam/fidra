@@ -1,5 +1,6 @@
 """Planned transactions view - manage planned transaction templates."""
 
+from datetime import date
 from typing import TYPE_CHECKING
 
 import qasync
@@ -365,7 +366,12 @@ class PlannedView(QWidget):
                 else:
                     status = ApprovalStatus.PENDING
 
-                actual_transaction = instance.with_updates(status=status)
+                # Build updates - optionally set date to today on conversion
+                updates = {"status": status}
+                if self._context.settings.transactions.date_on_planned_conversion:
+                    updates["date"] = date.today()
+
+                actual_transaction = instance.with_updates(**updates)
 
                 # Save actual transaction
                 from fidra.services.undo import AddTransactionCommand

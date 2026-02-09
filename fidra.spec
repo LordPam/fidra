@@ -144,8 +144,9 @@ if is_macos:
             'CFBundleDocumentTypes': [
                 {
                     'CFBundleTypeName': 'Fidra Database',
-                    'CFBundleTypeExtensions': ['db'],
+                    'CFBundleTypeExtensions': ['fdra'],
                     'CFBundleTypeRole': 'Editor',
+                    'CFBundleTypeIconFile': 'fidra.icns',
                 }
             ],
         },

@@ -503,8 +503,8 @@ class SetupWizard(QDialog):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Create New Database",
-            str(default_dir / "finances.db"),
-            "Database Files (*.db);;All Files (*)"
+            str(default_dir / "finances.fdra"),
+            "Fidra Files (*.fdra);;Legacy Database (*.db);;All Files (*)"
         )
 
         if file_path:
@@ -523,7 +523,7 @@ class SetupWizard(QDialog):
             self,
             "Open Existing Database",
             str(default_dir),
-            "Database Files (*.db);;All Files (*)"
+            "All Databases (*.fdra *.db);;Fidra Files (*.fdra);;Legacy Database (*.db);;All Files (*)"
         )
 
         if file_path:
