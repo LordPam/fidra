@@ -1,6 +1,6 @@
 """Transactions view - main transaction management interface."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from datetime import date, timedelta
 import asyncio
@@ -41,6 +41,9 @@ from fidra.services.undo import (
     EditTransactionCommand,
     DeleteTransactionCommand,
     BulkEditCommand,
+    DeletePlannedCommand,
+    EditPlannedCommand,
+    CompositeCommand,
 )
 from fidra.domain.models import Transaction, TransactionType, ApprovalStatus
 
@@ -647,10 +650,13 @@ class TransactionsView(QWidget):
         if edited:
             await self._save_edited_transaction(transaction, edited)
 
+        # Use edited transaction for attachment naming, fall back to original
+        trans_for_naming = edited if edited else transaction
         await self._process_attachment_changes(
             transaction.id,
             dialog.get_pending_attachments(),
             dialog.get_pending_removals(),
+            trans_for_naming,
         )
 
     async def _save_edited_transaction(
@@ -974,12 +980,15 @@ class TransactionsView(QWidget):
 
                 actual_transaction = planned_trans.with_updates(**updates)
 
-                # Save actual transaction
-                command = AddTransactionCommand(
+                # Build commands for composite undo
+                commands = []
+
+                # Command to add actual transaction
+                add_cmd = AddTransactionCommand(
                     self._context.transaction_repo, actual_transaction,
                     audit_service=self._context.audit_service,
                 )
-                await self._context.undo_stack.execute(command)
+                commands.append(add_cmd)
 
                 # Find the template that generated this instance
                 templates = self._context.state.planned_templates.value
@@ -990,13 +999,29 @@ class TransactionsView(QWidget):
                         template.type == planned_trans.type):
                         # Check if this is a one-time template
                         if template.frequency == Frequency.ONCE:
-                            # Delete the template entirely (it's fulfilled and won't generate more instances)
-                            await self._context.planned_repo.delete(template.id)
+                            # Delete the template entirely
+                            delete_cmd = DeletePlannedCommand(
+                                self._context.planned_repo,
+                                template,
+                            )
+                            commands.append(delete_cmd)
                         else:
                             # Mark as fulfilled for this date (recurring template)
                             updated_template = template.mark_fulfilled(planned_trans.date)
-                            await self._context.planned_repo.save(updated_template)
+                            edit_cmd = EditPlannedCommand(
+                                self._context.planned_repo,
+                                template,
+                                updated_template,
+                            )
+                            commands.append(edit_cmd)
                         break
+
+                # Execute as composite command (single undo step)
+                composite = CompositeCommand(
+                    commands,
+                    f"Convert planned: {planned_trans.description}"
+                )
+                await self._context.undo_stack.execute(composite)
 
             # Reload transactions and templates
             await self._load_transactions()
@@ -1039,7 +1064,12 @@ class TransactionsView(QWidget):
                         template.type == planned_trans.type):
                         # Skip this instance (adds to skipped_dates permanently)
                         updated_template = template.skip_instance(planned_trans.date)
-                        await self._context.planned_repo.save(updated_template)
+                        command = EditPlannedCommand(
+                            self._context.planned_repo,
+                            template,
+                            updated_template,
+                        )
+                        await self._context.undo_stack.execute(command)
                         break
 
             # Reload templates
@@ -1079,8 +1109,12 @@ class TransactionsView(QWidget):
                         if (template.description == planned_trans.description and
                             template.amount == planned_trans.amount and
                             template.type == planned_trans.type):
-                            # Delete the template entirely
-                            await self._context.planned_repo.delete(template.id)
+                            # Delete the template entirely via undo stack
+                            command = DeletePlannedCommand(
+                                self._context.planned_repo,
+                                template,
+                            )
+                            await self._context.undo_stack.execute(command)
                             break
 
                 # Reload templates
@@ -1158,9 +1192,20 @@ class TransactionsView(QWidget):
     # Attachment helpers
 
     async def _process_attachment_changes(
-        self, transaction_id, new_files: list, remove_ids: list
+        self,
+        transaction_id,
+        new_files: list,
+        remove_ids: list,
+        transaction: Optional[Transaction] = None,
     ) -> None:
-        """Process pending attachment additions and removals."""
+        """Process pending attachment additions and removals.
+
+        Args:
+            transaction_id: ID of the transaction
+            new_files: List of file paths to attach
+            remove_ids: List of attachment IDs to remove
+            transaction: Optional transaction for descriptive file naming
+        """
         svc = self._context.attachment_service
         if not svc:
             return
@@ -1170,7 +1215,7 @@ class TransactionsView(QWidget):
                 await svc.remove_attachment(attachment_id)
 
             for file_path in new_files:
-                await svc.attach_file(transaction_id, file_path)
+                await svc.attach_file(transaction_id, file_path, transaction)
         except Exception:
             pass  # Best-effort; transaction was already saved
 
@@ -1220,24 +1265,32 @@ class TransactionsView(QWidget):
         actual_only = [t for t in selected if t.status != ApprovalStatus.PLANNED]
 
         if planned_only and not actual_only:
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Delete Planned Transaction")
-            msg.setText(
-                f"{len(planned_only)} planned transaction{'s' if len(planned_only) != 1 else ''} selected."
-            )
-            msg.setInformativeText(
-                "Choose whether to delete just the selected instance(s) or the entire template."
-            )
-            delete_instance_btn = msg.addButton("Delete Instance", QMessageBox.AcceptRole)
-            delete_template_btn = msg.addButton("Delete Template", QMessageBox.DestructiveRole)
-            msg.addButton(QMessageBox.Cancel)
-            msg.exec()
+            # Check if all selected are one-time planned (ONCE frequency)
+            all_one_time = all(t.is_one_time_planned for t in planned_only)
 
-            clicked = msg.clickedButton()
-            if clicked == delete_instance_btn:
-                self._on_skip_instance_requested(planned_only)
-            elif clicked == delete_template_btn:
+            if all_one_time:
+                # For one-time planned, just delete the template directly
                 self._on_delete_template_requested(planned_only)
+            else:
+                # For recurring (or mixed), ask the user what to do
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Delete Planned Transaction")
+                msg.setText(
+                    f"{len(planned_only)} planned transaction{'s' if len(planned_only) != 1 else ''} selected."
+                )
+                msg.setInformativeText(
+                    "Choose whether to delete just the selected instance(s) or the entire template."
+                )
+                delete_instance_btn = msg.addButton("Delete Instance", QMessageBox.AcceptRole)
+                delete_template_btn = msg.addButton("Delete Template", QMessageBox.DestructiveRole)
+                msg.addButton(QMessageBox.Cancel)
+                msg.exec()
+
+                clicked = msg.clickedButton()
+                if clicked == delete_instance_btn:
+                    self._on_skip_instance_requested(planned_only)
+                elif clicked == delete_template_btn:
+                    self._on_delete_template_requested(planned_only)
             return
 
         if actual_only:

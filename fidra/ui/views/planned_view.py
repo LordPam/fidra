@@ -21,6 +21,12 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from fidra.ui.models.planned_tree_model import PlannedTreeModel
 from fidra.ui.dialogs.add_planned_dialog import AddPlannedDialog
 from fidra.ui.dialogs.edit_planned_dialog import EditPlannedDialog
+from fidra.services.undo import (
+    AddTransactionCommand,
+    DeletePlannedCommand,
+    EditPlannedCommand,
+    CompositeCommand,
+)
 
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
@@ -318,8 +324,12 @@ class PlannedView(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                # Delete template
-                await self._context.planned_repo.delete(template.id)
+                # Delete template via undo stack
+                command = DeletePlannedCommand(
+                    self._context.planned_repo,
+                    template,
+                )
+                await self._context.undo_stack.execute(command)
 
                 # Reload templates
                 await self._reload_templates()
@@ -373,22 +383,40 @@ class PlannedView(QWidget):
 
                 actual_transaction = instance.with_updates(**updates)
 
-                # Save actual transaction
-                from fidra.services.undo import AddTransactionCommand
-                command = AddTransactionCommand(
+                # Build commands for composite undo
+                commands = []
+
+                # Command to add actual transaction
+                add_cmd = AddTransactionCommand(
                     self._context.transaction_repo, actual_transaction,
                     audit_service=self._context.audit_service,
                 )
-                await self._context.undo_stack.execute(command)
+                commands.append(add_cmd)
 
                 # Check if this is a one-time template
                 if template.frequency == Frequency.ONCE:
-                    # Delete the template entirely (it's fulfilled and won't generate more instances)
-                    await self._context.planned_repo.delete(template.id)
+                    # Delete the template entirely
+                    delete_cmd = DeletePlannedCommand(
+                        self._context.planned_repo,
+                        template,
+                    )
+                    commands.append(delete_cmd)
                 else:
-                    # Mark template as fulfilled for this date (recurring template)
+                    # Mark template as fulfilled for this date
                     updated_template = template.mark_fulfilled(instance.date)
-                    await self._context.planned_repo.save(updated_template)
+                    edit_cmd = EditPlannedCommand(
+                        self._context.planned_repo,
+                        template,
+                        updated_template,
+                    )
+                    commands.append(edit_cmd)
+
+                # Execute as composite command (single undo step)
+                composite = CompositeCommand(
+                    commands,
+                    f"Convert planned: {instance.description}"
+                )
+                await self._context.undo_stack.execute(composite)
 
                 # Reload templates and transactions
                 await self._reload_templates()
@@ -426,9 +454,14 @@ class PlannedView(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                # Skip this instance date (adds to skipped_dates permanently)
+                # Skip this instance date via undo stack
                 updated_template = template.skip_instance(instance.date)
-                await self._context.planned_repo.save(updated_template)
+                command = EditPlannedCommand(
+                    self._context.planned_repo,
+                    template,
+                    updated_template,
+                )
+                await self._context.undo_stack.execute(command)
 
                 # Reload templates
                 await self._reload_templates()

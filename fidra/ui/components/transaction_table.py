@@ -100,6 +100,7 @@ class TransactionTable(QTableView):
             self._model.COL_TYPE: 75,
             self._model.COL_CATEGORY: 95,
             self._model.COL_PARTY: 130,
+            self._model.COL_REFERENCE: 100,
             self._model.COL_SHEET: 80,
             self._model.COL_STATUS: 85,
             self._model.COL_BALANCE: 95,
@@ -113,6 +114,7 @@ class TransactionTable(QTableView):
             self._model.COL_TYPE: 65,        # Fits "Expense"
             self._model.COL_CATEGORY: 85,    # Fits "Category" header
             self._model.COL_PARTY: 110,      # Close to description
+            self._model.COL_REFERENCE: 80,   # Fits "Reference" header
             self._model.COL_SHEET: 75,
             self._model.COL_STATUS: 75,      # Fits "Approved"
             self._model.COL_BALANCE: 90,     # Fits negative amounts
@@ -228,15 +230,26 @@ class TransactionTable(QTableView):
 
             menu.addSeparator()
 
-            # Delete This Instance (permanently removes just this occurrence)
-            delete_instance_action = QAction(f"Delete This Instance ({len(planned_only)})", self)
-            delete_instance_action.triggered.connect(lambda: self.skip_instance_requested.emit(planned_only))
-            menu.addAction(delete_instance_action)
+            # Check if all selected are one-time planned (ONCE frequency)
+            all_one_time = all(t.is_one_time_planned for t in planned_only)
+            any_recurring = any(not t.is_one_time_planned for t in planned_only)
 
-            # Delete Entire Template (removes all future instances)
-            delete_template_action = QAction(f"Delete Entire Template ({len(planned_only)})", self)
-            delete_template_action.triggered.connect(lambda: self.delete_template_requested.emit(planned_only))
-            menu.addAction(delete_template_action)
+            if all_one_time:
+                # For one-time planned, just show "Delete" (same as deleting template)
+                delete_action = QAction(f"Delete ({len(planned_only)})", self)
+                delete_action.triggered.connect(lambda: self.delete_template_requested.emit(planned_only))
+                menu.addAction(delete_action)
+            elif any_recurring:
+                # For recurring (or mixed), show both options
+                # Delete This Instance (permanently removes just this occurrence)
+                delete_instance_action = QAction(f"Delete This Instance ({len(planned_only)})", self)
+                delete_instance_action.triggered.connect(lambda: self.skip_instance_requested.emit(planned_only))
+                menu.addAction(delete_instance_action)
+
+                # Delete Entire Template (removes all future instances)
+                delete_template_action = QAction(f"Delete Entire Template ({len(planned_only)})", self)
+                delete_template_action.triggered.connect(lambda: self.delete_template_requested.emit(planned_only))
+                menu.addAction(delete_template_action)
 
             menu.addSeparator()
 

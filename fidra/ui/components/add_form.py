@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
     QCompleter,
+    QSizePolicy,
 )
 
 from fidra.domain.models import Transaction, TransactionType, ApprovalStatus
@@ -136,12 +137,14 @@ class AddTransactionForm(QWidget):
         self.category_input.setEditable(True)
         self.category_input.setPlaceholderText("Category")
         self.category_input.setMinimumHeight(26)
+        self.category_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._update_category_list()
         cat_party_layout.addWidget(self.category_input, 1)
 
         self.party_input = QLineEdit()
         self.party_input.setPlaceholderText("Party")
         self.party_input.setMinimumHeight(26)
+        self.party_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         cat_party_layout.addWidget(self.party_input, 1)
 
         layout.addLayout(cat_party_layout)

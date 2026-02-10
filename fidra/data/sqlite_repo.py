@@ -62,6 +62,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 sheet TEXT NOT NULL,
                 category TEXT,
                 party TEXT,
+                reference TEXT,
                 notes TEXT,
                 version INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -134,6 +135,18 @@ class SQLiteTransactionRepository(TransactionRepository):
         """
         )
         await self._conn.commit()
+        await self._run_migrations()
+
+    async def _run_migrations(self) -> None:
+        """Run database migrations for schema updates."""
+        # Add reference column if it doesn't exist (for existing databases)
+        try:
+            await self._conn.execute(
+                "ALTER TABLE transactions ADD COLUMN reference TEXT"
+            )
+            await self._conn.commit()
+        except Exception:
+            pass  # Column already exists
 
     async def get_all(self, sheet: Optional[str] = None) -> list[Transaction]:
         """Get all transactions, optionally filtered by sheet."""
@@ -175,8 +188,8 @@ class SQLiteTransactionRepository(TransactionRepository):
             """
             INSERT OR REPLACE INTO transactions
             (id, date, description, amount, type, status, sheet,
-             category, party, notes, version, created_at, modified_at, modified_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             category, party, reference, notes, version, created_at, modified_at, modified_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(transaction.id),
@@ -188,6 +201,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 transaction.sheet,
                 transaction.category,
                 transaction.party,
+                transaction.reference,
                 transaction.notes,
                 transaction.version,
                 transaction.created_at.isoformat(),
@@ -243,6 +257,7 @@ class SQLiteTransactionRepository(TransactionRepository):
             sheet=row["sheet"],
             category=row["category"],
             party=row["party"],
+            reference=row["reference"],
             notes=row["notes"],
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),

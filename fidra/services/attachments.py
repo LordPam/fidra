@@ -1,13 +1,17 @@
 """Attachment service for managing receipt/document files linked to transactions."""
 
 import mimetypes
+import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from fidra.data.repository import AttachmentRepository
 from fidra.domain.models import Attachment
+
+if TYPE_CHECKING:
+    from fidra.domain.models import Transaction
 
 
 class AttachmentService:
@@ -30,7 +34,10 @@ class AttachmentService:
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
     async def attach_file(
-        self, transaction_id: UUID, source_path: Path
+        self,
+        transaction_id: UUID,
+        source_path: Path,
+        transaction: Optional["Transaction"] = None,
     ) -> Attachment:
         """Attach a file to a transaction.
 
@@ -40,15 +47,20 @@ class AttachmentService:
         Args:
             transaction_id: Transaction to attach to
             source_path: Path to the source file
+            transaction: Optional transaction for descriptive file naming
 
         Returns:
             Created Attachment record
         """
         self._ensure_storage()
 
-        # Generate a unique stored name to avoid conflicts
+        # Generate stored name - descriptive if transaction provided, UUID otherwise
         suffix = source_path.suffix
-        stored_name = f"{uuid4().hex}{suffix}"
+        if transaction:
+            stored_name = self._generate_descriptive_name(transaction, suffix)
+        else:
+            stored_name = f"{uuid4().hex}{suffix}"
+
         dest_path = self._storage_dir / stored_name
 
         # Copy file to storage
@@ -71,6 +83,71 @@ class AttachmentService:
 
         await self._repo.save(attachment)
         return attachment
+
+    def _generate_descriptive_name(self, transaction: "Transaction", suffix: str) -> str:
+        """Generate a descriptive filename for an attachment.
+
+        Format: date_type_amount_party.extension (party in camelCase)
+        Example: 2026-02-10_expense_25.50_johnSmith.pdf
+
+        Args:
+            transaction: Transaction to generate name from
+            suffix: File extension (e.g., '.pdf')
+
+        Returns:
+            Descriptive filename
+        """
+        # Date in ISO format
+        date_str = transaction.date.isoformat()
+
+        # Transaction type
+        type_str = transaction.type.value  # 'income' or 'expense'
+
+        # Amount (formatted without currency symbol)
+        amount_str = f"{transaction.amount:.2f}"
+
+        # Party in camelCase (or 'unknown' if not set)
+        party = transaction.party or "unknown"
+        party_camel = self._to_camel_case(party)
+
+        # Base name
+        base_name = f"{date_str}_{type_str}_{amount_str}_{party_camel}"
+
+        # Ensure uniqueness by adding index if file exists
+        stored_name = f"{base_name}{suffix}"
+        index = 1
+        while (self._storage_dir / stored_name).exists():
+            stored_name = f"{base_name}_{index}{suffix}"
+            index += 1
+
+        return stored_name
+
+    def _to_camel_case(self, text: str) -> str:
+        """Convert text to camelCase.
+
+        Args:
+            text: Input text (e.g., 'John Smith', 'john-smith', 'ACME Corp')
+
+        Returns:
+            camelCase version (e.g., 'johnSmith', 'acmeCorp')
+        """
+        # Remove special characters and split into words
+        words = re.split(r'[\s\-_\.]+', text.strip())
+
+        if not words:
+            return "unknown"
+
+        # First word lowercase, rest title case
+        result = []
+        for i, word in enumerate(words):
+            if not word:
+                continue
+            if i == 0:
+                result.append(word.lower())
+            else:
+                result.append(word.capitalize())
+
+        return ''.join(result) or "unknown"
 
     async def get_attachments(self, transaction_id: UUID) -> list[Attachment]:
         """Get all attachments for a transaction."""

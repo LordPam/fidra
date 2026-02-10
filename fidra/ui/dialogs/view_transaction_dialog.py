@@ -72,6 +72,7 @@ class ViewTransactionDialog(QDialog):
         grid.addLayout(self._row("Sheet", self._transaction.sheet)[0])
         grid.addLayout(self._row("Category", self._transaction.category or "-")[0])
         grid.addLayout(self._row("Party", self._transaction.party or "-")[0])
+        grid.addLayout(self._row("Reference", self._transaction.reference or "-")[0])
         grid.addLayout(self._row("Notes", self._transaction.notes or "-")[0])
         self._attachments_row, self._attachments_value = self._row("Attachments", "None")
         grid.addLayout(self._attachments_row)
@@ -175,6 +176,7 @@ class ViewTransactionDialog(QDialog):
         date_str = self._transaction.date.strftime("%d %b %Y")
         category = self._transaction.category or "-"
         party = self._transaction.party or "-"
+        reference = self._transaction.reference or "-"
         notes = self._transaction.notes or "-"
 
         attachments_text = "None"
@@ -191,6 +193,7 @@ class ViewTransactionDialog(QDialog):
             f"Sheet: {self._transaction.sheet}\n"
             f"Category: {category}\n"
             f"Party: {party}\n"
+            f"Reference: {reference}\n"
             f"Notes: {notes}\n"
             f"Attachments: {attachments_text}"
         )

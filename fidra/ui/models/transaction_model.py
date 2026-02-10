@@ -33,10 +33,11 @@ class TransactionTableModel(QAbstractTableModel):
     COL_TYPE = 3
     COL_CATEGORY = 4
     COL_PARTY = 5
-    COL_SHEET = 6
-    COL_STATUS = 7
-    COL_BALANCE = 8
-    COL_NOTES = 9
+    COL_REFERENCE = 6
+    COL_SHEET = 7
+    COL_STATUS = 8
+    COL_BALANCE = 9
+    COL_NOTES = 10
 
     COLUMN_NAMES = [
         "Date",
@@ -45,6 +46,7 @@ class TransactionTableModel(QAbstractTableModel):
         "Type",
         "Category",
         "Party",
+        "Reference",
         "Sheet",
         "Status",
         "Balance",
@@ -122,6 +124,8 @@ class TransactionTableModel(QAbstractTableModel):
             return transaction.category or ""
         elif col == self.COL_PARTY:
             return transaction.party or ""
+        elif col == self.COL_REFERENCE:
+            return transaction.reference or ""
         elif col == self.COL_SHEET:
             return transaction.sheet or ""
         elif col == self.COL_STATUS:
@@ -232,6 +236,8 @@ class TransactionTableModel(QAbstractTableModel):
                 return (transaction.category or "").lower()
             if self._sort_column == self.COL_PARTY:
                 return (transaction.party or "").lower()
+            if self._sort_column == self.COL_REFERENCE:
+                return (transaction.reference or "").lower()
             if self._sort_column == self.COL_SHEET:
                 return (transaction.sheet or "").lower()
             if self._sort_column == self.COL_STATUS:
@@ -326,6 +332,8 @@ class TransactionTableModel(QAbstractTableModel):
                 return (transaction.category or "").lower()
             elif column == self.COL_PARTY:
                 return (transaction.party or "").lower()
+            elif column == self.COL_REFERENCE:
+                return (transaction.reference or "").lower()
             elif column == self.COL_SHEET:
                 return (transaction.sheet or "").lower()
             elif column == self.COL_STATUS:

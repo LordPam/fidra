@@ -137,6 +137,7 @@ class ForecastService:
             category=template.category,
             party=template.party,
             notes=None,  # Instances don't inherit notes from template
+            is_one_time_planned=template.frequency == Frequency.ONCE,
             version=1,
         )
 

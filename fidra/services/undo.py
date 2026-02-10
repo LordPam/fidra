@@ -9,8 +9,8 @@ from collections import deque
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Optional
 
-from fidra.data.repository import TransactionRepository
-from fidra.domain.models import Transaction
+from fidra.data.repository import TransactionRepository, PlannedRepository
+from fidra.domain.models import Transaction, PlannedTemplate
 
 if TYPE_CHECKING:
     from fidra.services.audit import AuditService
@@ -201,6 +201,103 @@ class BulkEditCommand(Command):
         """Describe the bulk edit operation."""
         count = len(self.new_transactions)
         return f"Bulk edit: {count} transaction{'s' if count != 1 else ''}"
+
+
+class DeletePlannedCommand(Command):
+    """Command to delete a planned template."""
+
+    def __init__(
+        self,
+        repository: PlannedRepository,
+        template: PlannedTemplate,
+    ):
+        self.repository = repository
+        self.template = template
+
+    async def execute(self) -> None:
+        """Delete the template from the repository."""
+        await self.repository.delete(self.template.id)
+
+    async def undo(self) -> None:
+        """Restore the deleted template."""
+        await self.repository.save(self.template)
+
+    def description(self) -> str:
+        """Describe the delete operation."""
+        return f"Delete planned: {self.template.description}"
+
+
+class EditPlannedCommand(Command):
+    """Command to edit a planned template (skip instance, mark fulfilled, etc.)."""
+
+    def __init__(
+        self,
+        repository: PlannedRepository,
+        old_template: PlannedTemplate,
+        new_template: PlannedTemplate,
+    ):
+        self.repository = repository
+        self.old_template = old_template
+        self.new_template = new_template
+        self._first_execute = True
+
+    async def execute(self) -> None:
+        """Save the new template state."""
+        if self._first_execute:
+            await self.repository.save(self.new_template)
+            self._first_execute = False
+        else:
+            # For redo, get current version and update
+            current = await self.repository.get_by_id(self.new_template.id)
+            if current is not None:
+                # Create with updated version
+                to_save = self.new_template.with_updates()
+                # Adjust version to current + 1
+                from dataclasses import asdict
+                data = asdict(to_save)
+                data['version'] = current.version + 1
+                await self.repository.save(PlannedTemplate(**data))
+            else:
+                await self.repository.save(self.new_template)
+
+    async def undo(self) -> None:
+        """Restore the old template state."""
+        current = await self.repository.get_by_id(self.old_template.id)
+        if current is not None:
+            from dataclasses import asdict
+            data = asdict(self.old_template)
+            data['version'] = current.version + 1
+            restored = PlannedTemplate(**data)
+            await self.repository.save(restored)
+        else:
+            # Template was deleted, restore it
+            await self.repository.save(self.old_template)
+
+    def description(self) -> str:
+        """Describe the edit operation."""
+        return f"Edit planned: {self.new_template.description}"
+
+
+class CompositeCommand(Command):
+    """Command that groups multiple commands into a single undoable action."""
+
+    def __init__(self, commands: list[Command], description_text: str):
+        self._commands = commands
+        self._description_text = description_text
+
+    async def execute(self) -> None:
+        """Execute all commands in order."""
+        for cmd in self._commands:
+            await cmd.execute()
+
+    async def undo(self) -> None:
+        """Undo all commands in reverse order."""
+        for cmd in reversed(self._commands):
+            await cmd.undo()
+
+    def description(self) -> str:
+        """Describe the composite operation."""
+        return self._description_text
 
 
 class UndoStack:

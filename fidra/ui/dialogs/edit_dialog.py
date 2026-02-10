@@ -164,6 +164,12 @@ class EditTransactionDialog(QDialog):
         if len(self._available_sheets) <= 1:
             self.sheet_combo.setVisible(False)
 
+        # ===== REFERENCE (For bank statement matching) =====
+        self.reference_input = QLineEdit()
+        self.reference_input.setPlaceholderText("Reference (for bank matching)")
+        self.reference_input.setMinimumHeight(32)
+        layout.addWidget(self.reference_input)
+
         # ===== NOTES (Single line) =====
         self.notes_input = QLineEdit()
         self.notes_input.setPlaceholderText("Notes (optional)")
@@ -342,6 +348,12 @@ class EditTransactionDialog(QDialog):
             # If transaction somehow has PLANNED status, default to PENDING
             self.status_combo.setCurrentIndex(expense_status_map.get(trans.status, 0))
 
+        # Reference
+        if trans.reference:
+            self.reference_input.setText(trans.reference)
+        else:
+            self.reference_input.clear()
+
         # Notes
         if trans.notes:
             self.notes_input.setText(trans.notes)
@@ -360,6 +372,7 @@ class EditTransactionDialog(QDialog):
         trans_type = TransactionType.EXPENSE if self.expense_btn.isChecked() else TransactionType.INCOME
         category = self.category_input.currentText().strip() or None
         party = self.party_input.text().strip() or None
+        reference = self.reference_input.text().strip() or None
         notes = self.notes_input.text().strip() or None
 
         # Sheet (use selected if available, otherwise keep original)
@@ -390,6 +403,7 @@ class EditTransactionDialog(QDialog):
             sheet=sheet,
             category=category,
             party=party,
+            reference=reference,
             notes=notes,
             status=status,
         )
@@ -491,7 +505,7 @@ class EditTransactionDialog(QDialog):
             self.attachment_list.clear()
             for att in attachments:
                 size_str = self._context.attachment_service.format_file_size(att.file_size)
-                item = QListWidgetItem(f"{att.filename}  ({size_str})")
+                item = QListWidgetItem(f"{att.stored_name}  ({size_str})")
                 item.setData(Qt.ItemDataRole.UserRole, att)
                 self.attachment_list.addItem(item)
         except Exception:
