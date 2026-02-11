@@ -30,6 +30,7 @@ class ThemeSettings(BaseModel):
 class SupabaseSettings(BaseModel):
     """Supabase/PostgreSQL connection settings."""
 
+    project_name: Optional[str] = None  # Display name (e.g., "Sub Aqua Club")
     project_url: Optional[str] = None  # e.g., "https://xxx.supabase.co"
     anon_key: Optional[str] = None  # Public anon key for Storage API
     db_connection_string: Optional[str] = None  # Direct PostgreSQL connection
@@ -40,6 +41,18 @@ class SupabaseSettings(BaseModel):
     pool_max_size: int = Field(default=10, ge=2, le=50)
 
     model_config = {"validate_assignment": True}
+
+    def get_display_name(self) -> str:
+        """Get a display name for the Supabase project."""
+        if self.project_name:
+            return self.project_name
+        # Try to extract from project URL (e.g., "https://abc123.supabase.co" -> "abc123")
+        if self.project_url:
+            import re
+            match = re.search(r'https?://([^.]+)\.supabase\.co', self.project_url)
+            if match:
+                return match.group(1)
+        return "Supabase"
 
 
 class StorageSettings(BaseModel):

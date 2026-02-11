@@ -83,12 +83,14 @@ class MainWindow(QMainWindow):
         initial_theme = Theme.DARK if saved_theme == "dark" else Theme.LIGHT
         self._theme_engine.apply_theme(initial_theme)
 
-        self.setWindowTitle("Fidra")
         self.setMinimumSize(1000, 700)
         self.resize(1280, 800)
 
         self._setup_ui()
         self._connect_signals()
+
+        # Set initial window title based on current backend
+        self._update_window_title()
 
         # Start on Dashboard
         self.navigate_to(ViewIndex.DASHBOARD)
@@ -331,13 +333,38 @@ class MainWindow(QMainWindow):
         Args:
             sheet: Selected sheet name
         """
-        if sheet == "All Sheets":
-            self.setWindowTitle("Fidra - All Sheets")
-        else:
-            self.setWindowTitle(f"Fidra - {sheet}")
+        self._update_window_title(sheet)
 
         # Reload transactions for the new sheet
         self._reload_transactions()
+
+    def _update_window_title(self, sheet: str | None = None) -> None:
+        """Update the window title based on current backend and sheet.
+
+        Args:
+            sheet: Current sheet name, or None to use state
+        """
+        if sheet is None:
+            sheet = self._state.current_sheet.value
+
+        # Get the database/project name
+        if self._ctx.is_supabase:
+            db_name = self._ctx.settings.storage.supabase.get_display_name()
+        elif self._ctx.settings.storage.last_file:
+            db_name = self._ctx.settings.storage.last_file.stem
+        else:
+            db_name = None
+
+        # Build title
+        parts = ["Fidra"]
+        if db_name:
+            parts.append(db_name)
+        if sheet and sheet != "All Sheets":
+            parts.append(sheet)
+        elif sheet == "All Sheets" and db_name:
+            pass  # Just show "Fidra - dbname"
+
+        self.setWindowTitle(" - ".join(parts))
 
     def _show_error(self, message: str | None) -> None:
         """Show error message in status bar.
@@ -504,7 +531,7 @@ class MainWindow(QMainWindow):
                 try:
                     await self._ctx.switch_database(path)
                     self.status_bar.showMessage(f"Opened {path.name}", 3000)
-                    self.setWindowTitle(f"Fidra - {path.name}")
+                    self._update_window_title()
                 except Exception as e:
                     self.status_bar.showMessage(f"Error opening database: {e}", 5000)
 
@@ -528,7 +555,7 @@ class MainWindow(QMainWindow):
             try:
                 await self._ctx.switch_database(path)
                 self.status_bar.showMessage(f"Created {path.name}", 3000)
-                self.setWindowTitle(f"Fidra - {path.name}")
+                self._update_window_title()
 
                 # Prompt for opening balance on new database
                 await self._prompt_opening_balance()
@@ -650,6 +677,9 @@ class MainWindow(QMainWindow):
                 transactions = await self._ctx.transaction_repo.get_all(sheet=sheet)
 
             self._state.transactions.set(transactions)
+
+            # Update window title (in case backend changed)
+            self._update_window_title()
         except Exception as e:
             self.status_bar.showMessage(f"Error loading transactions: {e}", 5000)
 

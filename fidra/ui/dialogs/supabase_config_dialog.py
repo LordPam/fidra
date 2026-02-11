@@ -53,6 +53,11 @@ class SupabaseConfigDialog(QDialog):
         conn_layout = QFormLayout(conn_group)
         conn_layout.setSpacing(12)
 
+        # Project Name (display name)
+        self.project_name_input = QLineEdit()
+        self.project_name_input.setPlaceholderText("e.g., Sub Aqua Club")
+        conn_layout.addRow("Project Name:", self.project_name_input)
+
         # Project URL
         self.project_url_input = QLineEdit()
         self.project_url_input.setPlaceholderText("https://your-project.supabase.co")
@@ -171,6 +176,7 @@ class SupabaseConfigDialog(QDialog):
 
     def _load_current_settings(self) -> None:
         """Load current Supabase settings into form."""
+        self.project_name_input.setText(self._supabase_settings.project_name or "")
         self.project_url_input.setText(self._supabase_settings.project_url or "")
         self.anon_key_input.setText(self._supabase_settings.anon_key or "")
         self.db_conn_input.setText(self._supabase_settings.db_connection_string or "")
@@ -227,6 +233,7 @@ class SupabaseConfigDialog(QDialog):
     def _on_save(self) -> None:
         """Save settings and close dialog."""
         # Update settings
+        self._supabase_settings.project_name = self.project_name_input.text().strip() or None
         self._supabase_settings.project_url = self.project_url_input.text().strip() or None
         self._supabase_settings.anon_key = self.anon_key_input.text().strip() or None
         self._supabase_settings.db_connection_string = self.db_conn_input.text().strip() or None
