@@ -44,12 +44,8 @@ async def create_repositories(
                   AuditRepository, AttachmentRepository)
 
     Raises:
-<<<<<<< HEAD
-        ValueError: If backend is unknown
-        DatabaseValidationError: If database file is not compatible
-=======
         ValueError: If backend is unknown or required params missing
->>>>>>> b9307e3 (Sync local changes)
+        DatabaseValidationError: If database file is not compatible
 
     Example:
         >>> # SQLite
@@ -62,14 +58,12 @@ async def create_repositories(
         >>> repos = await create_repositories("supabase", supabase_connection=conn)
     """
     if backend == "sqlite":
-<<<<<<< HEAD
-        # Validate database before connecting
-        validate_database(file_path)
-=======
         if not file_path:
             raise ValueError("file_path required for sqlite backend")
 
->>>>>>> b9307e3 (Sync local changes)
+        # Validate database before connecting
+        validate_database(file_path)
+
         trans_repo = SQLiteTransactionRepository(file_path)
         await trans_repo.connect()
 

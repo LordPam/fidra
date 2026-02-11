@@ -231,8 +231,9 @@ class TransactionTable(QTableView):
             menu.addSeparator()
 
             # Check if all selected are one-time planned (ONCE frequency)
-            all_one_time = all(t.is_one_time_planned for t in planned_only)
-            any_recurring = any(not t.is_one_time_planned for t in planned_only)
+            # is_one_time_planned is True for ONCE, False for recurring, None for actual
+            all_one_time = all(t.is_one_time_planned is True for t in planned_only)
+            any_recurring = any(t.is_one_time_planned is False for t in planned_only)
 
             if all_one_time:
                 # For one-time planned, just show "Delete" (same as deleting template)

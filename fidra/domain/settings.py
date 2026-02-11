@@ -47,11 +47,8 @@ class StorageSettings(BaseModel):
 
     backend: str = Field(default="sqlite", pattern="^(sqlite|excel|supabase)$")
     last_file: Optional[Path] = None
-<<<<<<< HEAD
     last_opened_at: Optional[str] = None  # ISO format datetime string
-=======
     supabase: SupabaseSettings = Field(default_factory=SupabaseSettings)
->>>>>>> b9307e3 (Sync local changes)
 
     model_config = {"validate_assignment": True}
 

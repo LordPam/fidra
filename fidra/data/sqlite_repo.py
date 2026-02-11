@@ -64,7 +64,6 @@ class SQLiteTransactionRepository(TransactionRepository):
                 party TEXT,
                 reference TEXT,
                 notes TEXT,
-                reference TEXT,
                 version INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL,
                 modified_at TEXT,
@@ -141,20 +140,6 @@ class SQLiteTransactionRepository(TransactionRepository):
     async def _run_migrations(self) -> None:
         """Run database migrations for schema updates."""
         # Add reference column if it doesn't exist (for existing databases)
-        try:
-            await self._conn.execute(
-                "ALTER TABLE transactions ADD COLUMN reference TEXT"
-            )
-            await self._conn.commit()
-        except Exception:
-            pass  # Column already exists
-
-        # Migration: Add reference column if it doesn't exist
-        await self._migrate_add_reference_column()
-
-    async def _migrate_add_reference_column(self) -> None:
-        """Add reference column to transactions table if missing."""
-        # Check if reference column exists
         async with self._conn.execute("PRAGMA table_info(transactions)") as cursor:
             columns = await cursor.fetchall()
             column_names = [col[1] for col in columns]
@@ -205,11 +190,7 @@ class SQLiteTransactionRepository(TransactionRepository):
             """
             INSERT OR REPLACE INTO transactions
             (id, date, description, amount, type, status, sheet,
-<<<<<<< HEAD
              category, party, reference, notes, version, created_at, modified_at, modified_by)
-=======
-             category, party, notes, reference, version, created_at, modified_at, modified_by)
->>>>>>> b9307e3 (Sync local changes)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
@@ -224,7 +205,6 @@ class SQLiteTransactionRepository(TransactionRepository):
                 transaction.party,
                 transaction.reference,
                 transaction.notes,
-                transaction.reference,
                 transaction.version,
                 transaction.created_at.isoformat(),
                 transaction.modified_at.isoformat() if transaction.modified_at else None,
@@ -285,9 +265,8 @@ class SQLiteTransactionRepository(TransactionRepository):
             sheet=row["sheet"],
             category=row["category"],
             party=row["party"],
-            reference=row["reference"],
-            notes=row["notes"],
             reference=reference,
+            notes=row["notes"],
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),
             modified_at=(

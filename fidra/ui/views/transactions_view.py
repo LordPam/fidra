@@ -1266,7 +1266,8 @@ class TransactionsView(QWidget):
 
         if planned_only and not actual_only:
             # Check if all selected are one-time planned (ONCE frequency)
-            all_one_time = all(t.is_one_time_planned for t in planned_only)
+            # is_one_time_planned is True for ONCE, False for recurring
+            all_one_time = all(t.is_one_time_planned is True for t in planned_only)
 
             if all_one_time:
                 # For one-time planned, just delete the template directly

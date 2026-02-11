@@ -42,11 +42,8 @@ from fidra.ui.dialogs.manage_categories_dialog import ManageCategoriesDialog
 from fidra.ui.dialogs.migration_dialog import MigrationDialog
 from fidra.ui.dialogs.opening_balance_dialog import OpeningBalanceDialog
 from fidra.ui.dialogs.profile_dialog import ProfileDialog
-<<<<<<< HEAD
-from fidra.ui.dialogs.transaction_settings_dialog import TransactionSettingsDialog
-=======
 from fidra.ui.dialogs.supabase_config_dialog import SupabaseConfigDialog
->>>>>>> b9307e3 (Sync local changes)
+from fidra.ui.dialogs.transaction_settings_dialog import TransactionSettingsDialog
 from fidra.ui.components.notification_banner import NotificationBanner
 
 
