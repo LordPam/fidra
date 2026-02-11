@@ -59,7 +59,11 @@ class Transaction:
     party: Optional[str] = None
     reference: Optional[str] = None  # Bank statement reference for matching
     notes: Optional[str] = None
+<<<<<<< HEAD
     is_one_time_planned: Optional[bool] = None  # True for ONCE planned instances
+=======
+    reference: Optional[str] = None  # Bank statement reference for matching
+>>>>>>> b9307e3 (Sync local changes)
     version: int = 1
     created_at: datetime = field(default_factory=datetime.now)
     modified_at: Optional[datetime] = None

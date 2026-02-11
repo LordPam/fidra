@@ -164,9 +164,15 @@ class EditTransactionDialog(QDialog):
         if len(self._available_sheets) <= 1:
             self.sheet_combo.setVisible(False)
 
+<<<<<<< HEAD
         # ===== REFERENCE (For bank statement matching) =====
         self.reference_input = QLineEdit()
         self.reference_input.setPlaceholderText("Reference (for bank matching)")
+=======
+        # ===== REFERENCE =====
+        self.reference_input = QLineEdit()
+        self.reference_input.setPlaceholderText("Reference (bank statement, invoice #, etc.)")
+>>>>>>> b9307e3 (Sync local changes)
         self.reference_input.setMinimumHeight(32)
         layout.addWidget(self.reference_input)
 

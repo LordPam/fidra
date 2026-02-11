@@ -27,12 +27,31 @@ class ThemeSettings(BaseModel):
     model_config = {"validate_assignment": True}
 
 
+class SupabaseSettings(BaseModel):
+    """Supabase/PostgreSQL connection settings."""
+
+    project_url: Optional[str] = None  # e.g., "https://xxx.supabase.co"
+    anon_key: Optional[str] = None  # Public anon key for Storage API
+    db_connection_string: Optional[str] = None  # Direct PostgreSQL connection
+    storage_bucket: str = "attachments"
+
+    # Connection pool settings
+    pool_min_size: int = Field(default=2, ge=1, le=10)
+    pool_max_size: int = Field(default=10, ge=2, le=50)
+
+    model_config = {"validate_assignment": True}
+
+
 class StorageSettings(BaseModel):
     """Storage backend configuration."""
 
-    backend: str = Field(default="sqlite", pattern="^(sqlite|excel)$")
+    backend: str = Field(default="sqlite", pattern="^(sqlite|excel|supabase)$")
     last_file: Optional[Path] = None
+<<<<<<< HEAD
     last_opened_at: Optional[str] = None  # ISO format datetime string
+=======
+    supabase: SupabaseSettings = Field(default_factory=SupabaseSettings)
+>>>>>>> b9307e3 (Sync local changes)
 
     model_config = {"validate_assignment": True}
 

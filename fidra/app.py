@@ -6,7 +6,7 @@ and provides them to the UI layer.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from fidra.data.factory import create_repositories
 from fidra.data.repository import (
@@ -52,6 +52,7 @@ class ApplicationContext:
         Args:
             db_path: Optional path to database file.
                      Defaults to "fidra.db" in current directory.
+                     Ignored when using Supabase backend.
         """
         self._db_path = db_path or Path("fidra.db")
 
@@ -62,6 +63,9 @@ class ApplicationContext:
         # State
         self.state = AppState()
 
+        # Supabase connection (initialized in initialize() if using supabase backend)
+        self._supabase_connection = None
+
         # Repositories (initialized in initialize())
         self.transaction_repo: Optional[TransactionRepository] = None
         self.planned_repo: Optional[PlannedRepository] = None
@@ -70,7 +74,7 @@ class ApplicationContext:
         self.attachment_repo: Optional[AttachmentRepository] = None
 
         # Services
-        self.attachment_service: Optional[AttachmentService] = None
+        self.attachment_service: Optional[Union[AttachmentService, "SupabaseAttachmentService"]] = None
         self.audit_service: Optional[AuditService] = None
         self.backup_service = BackupService(self._db_path, self.settings.backup)
         self.balance_service = BalanceService()
@@ -94,21 +98,46 @@ class ApplicationContext:
         """
         # Create repositories based on settings
         backend = self.settings.storage.backend
-        (
-            self.transaction_repo, self.planned_repo, self.sheet_repo,
-            self.audit_repo, self.attachment_repo,
-        ) = await create_repositories(backend, self._db_path)
 
-        # Create services
-        user = self.settings.profile.initials or self.settings.profile.name or "System"
-        self.audit_service = AuditService(self.audit_repo, user=user)
-        self.attachment_service = AttachmentService(self.attachment_repo, self._db_path)
+        if backend == "supabase":
+            # Initialize Supabase connection and repositories
+            from fidra.data.supabase_connection import SupabaseConnection
+            from fidra.services.supabase_attachments import SupabaseAttachmentService
+
+            supabase_config = self.settings.storage.supabase
+            self._supabase_connection = SupabaseConnection(supabase_config)
+            await self._supabase_connection.connect()
+
+            (
+                self.transaction_repo, self.planned_repo, self.sheet_repo,
+                self.audit_repo, self.attachment_repo,
+            ) = await create_repositories(
+                backend, supabase_connection=self._supabase_connection
+            )
+
+            # Create Supabase attachment service
+            user = self.settings.profile.initials or self.settings.profile.name or "System"
+            self.audit_service = AuditService(self.audit_repo, user=user)
+            self.attachment_service = SupabaseAttachmentService(
+                self.attachment_repo, supabase_config
+            )
+        else:
+            # SQLite backend (default)
+            (
+                self.transaction_repo, self.planned_repo, self.sheet_repo,
+                self.audit_repo, self.attachment_repo,
+            ) = await create_repositories(backend, self._db_path)
+
+            # Create local attachment service
+            user = self.settings.profile.initials or self.settings.profile.name or "System"
+            self.audit_service = AuditService(self.audit_repo, user=user)
+            self.attachment_service = AttachmentService(self.attachment_repo, self._db_path)
+
+            # Start watching the database file for external changes (SQLite only)
+            self.file_watcher.start_watching(self._db_path)
 
         # Load initial data
         await self._load_initial_data()
-
-        # Start watching the database file for external changes
-        self.file_watcher.start_watching(self._db_path)
 
         # Restore UI state from settings
         self._restore_ui_state()
@@ -160,22 +189,30 @@ class ApplicationContext:
 
     async def close(self) -> None:
         """Close resources (database connections)."""
-        # Auto-backup on close if enabled
-        if self.settings.backup.auto_backup_on_close:
+        backend = self.settings.storage.backend
+
+        # Auto-backup on close if enabled (SQLite only)
+        if backend == "sqlite" and self.settings.backup.auto_backup_on_close:
             try:
                 self.backup_service.create_backup(trigger="auto_close")
             except Exception:
                 # Don't block closing on backup failure
                 pass
 
-        # Stop file watcher
+        # Stop file watcher (SQLite only)
         self.file_watcher.stop_watching()
 
-        if self.transaction_repo:
-            await self.transaction_repo.close()
+        # Close connections based on backend
+        if backend == "supabase":
+            if self._supabase_connection:
+                await self._supabase_connection.close()
+                self._supabase_connection = None
+        else:
+            if self.transaction_repo:
+                await self.transaction_repo.close()
 
     async def switch_database(self, new_path: Path) -> None:
-        """Switch to a different database file.
+        """Switch to a different SQLite database file.
 
         Args:
             new_path: Path to the new database file
@@ -183,15 +220,15 @@ class ApplicationContext:
         # Close existing connections
         await self.close()
 
-        # Update path
+        # Update path and ensure SQLite backend
         self._db_path = new_path
+        self.settings.storage.backend = "sqlite"
 
         # Reinitialize repositories
-        backend = self.settings.storage.backend
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
             self.audit_repo, self.attachment_repo,
-        ) = await create_repositories(backend, self._db_path)
+        ) = await create_repositories("sqlite", self._db_path)
 
         # Recreate services with new repos
         user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -211,6 +248,54 @@ class ApplicationContext:
         self.settings.storage.last_file = new_path
         self.settings.storage.last_opened_at = datetime.now().isoformat()
         self.save_settings()
+
+    async def switch_to_supabase(self) -> None:
+        """Switch to Supabase backend using configured settings.
+
+        Requires Supabase settings to be configured first.
+        """
+        from fidra.data.supabase_connection import SupabaseConnection
+        from fidra.services.supabase_attachments import SupabaseAttachmentService
+
+        supabase_config = self.settings.storage.supabase
+        if not supabase_config.db_connection_string:
+            raise ValueError("Supabase connection string not configured")
+
+        # Close existing connections
+        await self.close()
+
+        # Update backend
+        self.settings.storage.backend = "supabase"
+
+        # Initialize Supabase connection
+        self._supabase_connection = SupabaseConnection(supabase_config)
+        await self._supabase_connection.connect()
+
+        # Create repositories
+        (
+            self.transaction_repo, self.planned_repo, self.sheet_repo,
+            self.audit_repo, self.attachment_repo,
+        ) = await create_repositories(
+            "supabase", supabase_connection=self._supabase_connection
+        )
+
+        # Recreate services
+        user = self.settings.profile.initials or self.settings.profile.name or "System"
+        self.audit_service = AuditService(self.audit_repo, user=user)
+        self.attachment_service = SupabaseAttachmentService(
+            self.attachment_repo, supabase_config
+        )
+
+        # Reload all data
+        await self._load_initial_data()
+
+        # Save settings
+        self.save_settings()
+
+    @property
+    def is_supabase(self) -> bool:
+        """Check if currently using Supabase backend."""
+        return self.settings.storage.backend == "supabase"
 
     @property
     def db_path(self) -> Path:

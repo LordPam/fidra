@@ -39,9 +39,14 @@ from fidra.ui.dialogs.audit_log_dialog import AuditLogDialog
 from fidra.ui.dialogs.backup_restore_dialog import BackupRestoreDialog
 from fidra.ui.dialogs.financial_year_dialog import FinancialYearDialog
 from fidra.ui.dialogs.manage_categories_dialog import ManageCategoriesDialog
+from fidra.ui.dialogs.migration_dialog import MigrationDialog
 from fidra.ui.dialogs.opening_balance_dialog import OpeningBalanceDialog
 from fidra.ui.dialogs.profile_dialog import ProfileDialog
+<<<<<<< HEAD
 from fidra.ui.dialogs.transaction_settings_dialog import TransactionSettingsDialog
+=======
+from fidra.ui.dialogs.supabase_config_dialog import SupabaseConfigDialog
+>>>>>>> b9307e3 (Sync local changes)
 from fidra.ui.components.notification_banner import NotificationBanner
 
 
@@ -400,6 +405,22 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
+        # Supabase options
+        supabase_action = menu.addAction("Configure Supabase...")
+        supabase_action.triggered.connect(self._show_supabase_config)
+
+        migrate_action = menu.addAction("Migrate Data...")
+        migrate_action.triggered.connect(self._show_migration)
+
+        # Show current backend status
+        if self._ctx.is_supabase:
+            backend_info = menu.addAction("Backend: Supabase (cloud)")
+        else:
+            backend_info = menu.addAction("Backend: SQLite (local)")
+        backend_info.setEnabled(False)
+
+        menu.addSeparator()
+
         # Profile settings
         profile_action = menu.addAction("Profile...")
         profile_action.triggered.connect(self._show_profile)
@@ -440,6 +461,18 @@ class MainWindow(QMainWindow):
         dialog = BackupRestoreDialog(self._ctx, self)
         if dialog.exec():
             # Reload data after potential restore
+            self._reload_transactions()
+
+    def _show_supabase_config(self) -> None:
+        """Show the Supabase configuration dialog."""
+        dialog = SupabaseConfigDialog(self._ctx, self)
+        dialog.exec()
+
+    def _show_migration(self) -> None:
+        """Show the data migration dialog."""
+        dialog = MigrationDialog(self._ctx, self)
+        if dialog.exec():
+            # Reload data after migration
             self._reload_transactions()
 
     def _show_financial_year_settings(self) -> None:
