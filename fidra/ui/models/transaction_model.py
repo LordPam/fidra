@@ -36,7 +36,8 @@ class TransactionTableModel(QAbstractTableModel):
     COL_SHEET = 6
     COL_STATUS = 7
     COL_BALANCE = 8
-    COL_NOTES = 9
+    COL_REFERENCE = 9
+    COL_NOTES = 10
 
     COLUMN_NAMES = [
         "Date",
@@ -48,6 +49,7 @@ class TransactionTableModel(QAbstractTableModel):
         "Sheet",
         "Status",
         "Balance",
+        "Reference",
         "Notes",
     ]
 
@@ -131,6 +133,8 @@ class TransactionTableModel(QAbstractTableModel):
             if balance is not None:
                 return f"£{balance:.2f}"
             return ""
+        elif col == self.COL_REFERENCE:
+            return transaction.reference or ""
         elif col == self.COL_NOTES:
             return transaction.notes or ""
         return None
@@ -245,6 +249,8 @@ class TransactionTableModel(QAbstractTableModel):
             if self._sort_column == self.COL_BALANCE:
                 balance = self._balances.get(str(transaction.id), Decimal(0))
                 return balance
+            if self._sort_column == self.COL_REFERENCE:
+                return (transaction.reference or "").lower()
             if self._sort_column == self.COL_NOTES:
                 return (transaction.notes or "").lower()
             return transaction.date
@@ -340,6 +346,8 @@ class TransactionTableModel(QAbstractTableModel):
             elif column == self.COL_BALANCE:
                 balance = self._balances.get(str(transaction.id), Decimal(0))
                 return balance
+            elif column == self.COL_REFERENCE:
+                return (transaction.reference or "").lower()
             elif column == self.COL_NOTES:
                 return (transaction.notes or "").lower()
             else:

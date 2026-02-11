@@ -58,6 +58,7 @@ class Transaction:
     category: Optional[str] = None
     party: Optional[str] = None
     notes: Optional[str] = None
+    reference: Optional[str] = None  # Bank statement reference for matching
     version: int = 1
     created_at: datetime = field(default_factory=datetime.now)
     modified_at: Optional[datetime] = None

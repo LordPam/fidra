@@ -63,6 +63,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 category TEXT,
                 party TEXT,
                 notes TEXT,
+                reference TEXT,
                 version INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL,
                 modified_at TEXT,
@@ -135,6 +136,22 @@ class SQLiteTransactionRepository(TransactionRepository):
         )
         await self._conn.commit()
 
+        # Migration: Add reference column if it doesn't exist
+        await self._migrate_add_reference_column()
+
+    async def _migrate_add_reference_column(self) -> None:
+        """Add reference column to transactions table if missing."""
+        # Check if reference column exists
+        async with self._conn.execute("PRAGMA table_info(transactions)") as cursor:
+            columns = await cursor.fetchall()
+            column_names = [col[1] for col in columns]
+
+        if "reference" not in column_names:
+            await self._conn.execute(
+                "ALTER TABLE transactions ADD COLUMN reference TEXT"
+            )
+            await self._conn.commit()
+
     async def get_all(self, sheet: Optional[str] = None) -> list[Transaction]:
         """Get all transactions, optionally filtered by sheet."""
         query = "SELECT * FROM transactions"
@@ -175,8 +192,8 @@ class SQLiteTransactionRepository(TransactionRepository):
             """
             INSERT OR REPLACE INTO transactions
             (id, date, description, amount, type, status, sheet,
-             category, party, notes, version, created_at, modified_at, modified_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             category, party, notes, reference, version, created_at, modified_at, modified_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(transaction.id),
@@ -189,6 +206,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 transaction.category,
                 transaction.party,
                 transaction.notes,
+                transaction.reference,
                 transaction.version,
                 transaction.created_at.isoformat(),
                 transaction.modified_at.isoformat() if transaction.modified_at else None,
@@ -233,6 +251,12 @@ class SQLiteTransactionRepository(TransactionRepository):
 
     def _row_to_transaction(self, row: aiosqlite.Row) -> Transaction:
         """Convert database row to Transaction model."""
+        # Handle reference field which may not exist in older databases
+        try:
+            reference = row["reference"]
+        except (KeyError, IndexError):
+            reference = None
+
         return Transaction(
             id=UUID(row["id"]),
             date=date.fromisoformat(row["date"]),
@@ -244,6 +268,7 @@ class SQLiteTransactionRepository(TransactionRepository):
             category=row["category"],
             party=row["party"],
             notes=row["notes"],
+            reference=reference,
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),
             modified_at=(

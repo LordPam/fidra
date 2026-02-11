@@ -148,6 +148,14 @@ class AddTransactionForm(QWidget):
 
         layout.addStretch(1)
 
+        # ===== REFERENCE =====
+        self.reference_input = QLineEdit()
+        self.reference_input.setPlaceholderText("Reference (bank statement, invoice #, etc.)")
+        self.reference_input.setMinimumHeight(26)
+        layout.addWidget(self.reference_input)
+
+        layout.addStretch(1)
+
         # ===== NOTES (Single line, optional) =====
         self.notes_input = QLineEdit()
         self.notes_input.setPlaceholderText("Notes (optional)")
@@ -231,6 +239,7 @@ class AddTransactionForm(QWidget):
         trans_type = TransactionType.EXPENSE if self.expense_btn.isChecked() else TransactionType.INCOME
         category = self.category_input.currentText().strip() or None
         party = self.party_input.text().strip() or None
+        reference = self.reference_input.text().strip() or None
         notes = self.notes_input.text().strip() or None
 
         # Determine which sheet to use
@@ -257,6 +266,7 @@ class AddTransactionForm(QWidget):
             sheet=sheet,
             category=category,
             party=party,
+            reference=reference,
             notes=notes,
             status=status,
         )
@@ -297,6 +307,7 @@ class AddTransactionForm(QWidget):
         self.amount_input.setValue(0.00)
         self.category_input.setCurrentIndex(0)
         self.party_input.clear()
+        self.reference_input.clear()
         self.notes_input.clear()
         self.date_edit.setDate(QDate.currentDate())
         self.amount_input.setFocus()
