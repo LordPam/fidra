@@ -272,21 +272,26 @@ class TransactionTable(QTableView):
 
             menu.addSeparator()
 
-        # Approve/Reject (only for expenses, non-planned)
-        expenses_only = [t for t in selected
-                        if t.type == TransactionType.EXPENSE
-                        and t.status != ApprovalStatus.PLANNED]
+        # Approve/Reject (only for pending expenses)
+        # Only show Approve for expenses that aren't already approved
+        approvable = [t for t in selected
+                      if t.type == TransactionType.EXPENSE
+                      and t.status not in (ApprovalStatus.PLANNED, ApprovalStatus.APPROVED)]
+        # Only show Reject for expenses that aren't already rejected
+        rejectable = [t for t in selected
+                      if t.type == TransactionType.EXPENSE
+                      and t.status not in (ApprovalStatus.PLANNED, ApprovalStatus.REJECTED)]
 
-        if expenses_only:
-            # Approve
-            approve_action = QAction(f"Approve ({len(expenses_only)})", self)
-            approve_action.triggered.connect(lambda: self.approve_requested.emit(expenses_only))
-            menu.addAction(approve_action)
+        if approvable or rejectable:
+            if approvable:
+                approve_action = QAction(f"Approve ({len(approvable)})", self)
+                approve_action.triggered.connect(lambda: self.approve_requested.emit(approvable))
+                menu.addAction(approve_action)
 
-            # Reject
-            reject_action = QAction(f"Reject ({len(expenses_only)})", self)
-            reject_action.triggered.connect(lambda: self.reject_requested.emit(expenses_only))
-            menu.addAction(reject_action)
+            if rejectable:
+                reject_action = QAction(f"Reject ({len(rejectable)})", self)
+                reject_action.triggered.connect(lambda: self.reject_requested.emit(rejectable))
+                menu.addAction(reject_action)
 
             menu.addSeparator()
 

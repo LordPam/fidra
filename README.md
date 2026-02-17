@@ -1,15 +1,20 @@
 # Fidra 2.0
 
-A local-first financial ledger application for treasurers and individuals who need to track income, expenses, planned transactions, and generate financial reports.
+A local-first financial ledger application for treasurers and individuals who need to track income, expenses, planned transactions, and generate financial reports. Supports optional cloud sync via PostgreSQL (Supabase or self-hosted).
 
-## Features (Phase 1 - Foundation)
+## Features
 
-- ✅ Immutable domain models (Transaction, PlannedTemplate, Sheet)
-- ✅ SQLite data layer with async support
-- ✅ Reactive state management
-- ✅ Basic Qt UI shell
-- ✅ Settings persistence
-- ✅ Comprehensive test coverage
+- **Transaction Management**: Add, edit, delete, and bulk-edit transactions with undo/redo
+- **Planned Transactions**: Recurring templates (weekly, monthly, quarterly, yearly) with auto-expansion
+- **Approval Workflow**: Pending/Approved/Rejected status for expenses
+- **Cloud Sync**: Optional PostgreSQL backend with offline-first caching and background sync
+- **Real-Time Updates**: PostgreSQL LISTEN/NOTIFY for instant cross-device sync
+- **Attachments**: Receipt/document uploads via Supabase Storage
+- **Dashboard**: Balance overview, charts, and upcoming transactions
+- **Search & Filter**: Boolean query search across all fields
+- **Reports & Export**: CSV, Markdown, and PDF export with customisable reports
+- **Multi-Sheet Support**: Organise transactions across multiple accounts/sheets
+- **Themes**: Light and dark mode
 
 ## Installation
 
@@ -20,7 +25,6 @@ A local-first financial ledger application for treasurers and individuals who ne
 ### Setup
 
 ```bash
-# Clone the repository
 cd Fidra
 
 # Install dependencies with uv
@@ -45,9 +49,6 @@ pytest
 
 # Run linting
 ruff check fidra
-
-# Run type checking
-mypy fidra
 ```
 
 ## Architecture
@@ -55,55 +56,40 @@ mypy fidra
 ```
 Domain Layer (models: Transaction, PlannedTemplate, Sheet, Category)
     ↓
-Data Layer (SQLite repositories with abstract interface)
+Data Layer (SQLite local + PostgreSQL cloud, abstract repository interface)
     ↓
-State Layer (reactive observables, centralized AppState)
+Sync Layer (SyncQueue, CachingRepository, SyncService, ChangeListener)
     ↓
-UI Layer (PySide6 with tab navigation)
+State Layer (reactive observables, centralised AppState)
+    ↓
+UI Layer (PySide6 with tab navigation, dark/light themes)
 ```
 
-## Development Status
+### Cloud Sync Architecture
 
-**Current Phase**: Phase 1 - Foundation ✅ COMPLETE
+When connected to a cloud server:
 
-### Phase 1 Completed
-- ✅ Project structure and configuration
-- ✅ Domain models (Transaction, PlannedTemplate, Sheet, Category)
-- ✅ AppSettings with Pydantic validation
-- ✅ Data layer (SQLite repositories with async support)
-- ✅ State management (Observable, AppState, persistence)
-- ✅ ApplicationContext for dependency injection
-- ✅ Main window shell with navigation
-- ✅ Entry point with qasync integration
-- ✅ **57 passing tests** (100% coverage of implemented features)
+- **CachingRepository**: Reads from local SQLite cache, writes locally then queues for sync
+- **SyncQueue**: Persistent SQLite queue of pending changes (survives app restarts)
+- **SyncService**: Background service that pushes queued changes to PostgreSQL
+  - Event-driven: changes sync within ~1s via debounced queue callbacks
+  - Safety-net: 30s polling timer catches any missed events
+- **ChangeListener**: PostgreSQL LISTEN/NOTIFY for real-time remote change detection
+- **ConnectionStateService**: Health monitoring with automatic reconnection
+  - 5s recovery checks when offline, 30s health checks when connected
+  - Auto-recovery when network returns (no restart needed)
 
-### Verification Results
-```
-✅ Application initializes successfully
-✅ Database connects and creates schema
-✅ Transactions save and retrieve correctly
-✅ Optimistic concurrency control works
-✅ Settings persist to ~/.fidra_settings.json
-✅ State management reactive updates work
-✅ Main window displays with navigation
-```
+## Cloud Setup
 
-### Future Phases
-- Phase 2: Transaction CRUD & Balance
-- Phase 3: Planned Transactions & Approval
-- Phase 4: Search & Filter
-- Phase 5: Reports & Export
-- Phase 6: Themes & Polish
-- Phase 7: Testing & Packaging
+See [docs/cloud-setup-guide.md](docs/cloud-setup-guide.md) for Supabase configuration instructions.
 
 ## Design Principles
 
-1. **Local-First**: All data stored locally, no cloud dependency
+1. **Local-First**: Works fully offline; cloud sync is optional
 2. **Immutable Data**: Transaction objects are immutable; updates create new instances
 3. **Reactive UI**: State changes automatically update the interface
-4. **Command Pattern**: All mutations via commands for undo/redo
-5. **Type Safety**: Full type annotations throughout
-6. **Testability**: Dependency injection enables unit testing
+4. **Type Safety**: Full type annotations throughout
+5. **Testability**: Dependency injection and abstract repositories enable unit testing
 
 ## License
 

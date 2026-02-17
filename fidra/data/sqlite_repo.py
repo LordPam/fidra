@@ -11,6 +11,7 @@ from uuid import UUID
 from fidra.data.repository import (
     AttachmentRepository,
     AuditRepository,
+    CategoryRepository,
     ConcurrencyError,
     PlannedRepository,
     SheetRepository,
@@ -132,6 +133,16 @@ class SQLiteTransactionRepository(TransactionRepository):
 
             CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
             CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id);
+
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+                name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                UNIQUE(type, name)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type);
         """
         )
         await self._conn.commit()
@@ -173,18 +184,24 @@ class SQLiteTransactionRepository(TransactionRepository):
             row = await cursor.fetchone()
             return self._row_to_transaction(row) if row else None
 
-    async def save(self, transaction: Transaction) -> Transaction:
-        """Save (insert or update) a transaction."""
-        # Check for version conflict
-        # For updates: DB version should be transaction.version - 1
-        # For inserts: DB version should be None
-        existing_version = await self.get_version(transaction.id)
-        if existing_version is not None:
-            # This is an update - check that we're updating from the right version
-            if existing_version != transaction.version - 1:
-                raise ConcurrencyError(
-                    f"Version conflict: expected DB version {transaction.version - 1}, found {existing_version}"
-                )
+    async def save(self, transaction: Transaction, *, force: bool = False) -> Transaction:
+        """Save (insert or update) a transaction.
+
+        Args:
+            transaction: Transaction to save.
+            force: If True, skip version check (used for cache refresh from cloud).
+        """
+        if not force:
+            # Check for version conflict
+            # For updates: DB version should be transaction.version - 1
+            # For inserts: DB version should be None
+            existing_version = await self.get_version(transaction.id)
+            if existing_version is not None:
+                # This is an update - check that we're updating from the right version
+                if existing_version != transaction.version - 1:
+                    raise ConcurrencyError(
+                        f"Version conflict: expected DB version {transaction.version - 1}, found {existing_version}"
+                    )
 
         await self._conn.execute(
             """
@@ -604,3 +621,73 @@ class SQLiteAuditRepository(AuditRepository):
             summary=row["summary"],
             details=row["details"],
         )
+
+
+class SQLiteCategoryRepository(CategoryRepository):
+    """SQLite implementation of CategoryRepository."""
+
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        self._conn: Optional[aiosqlite.Connection] = None
+
+    async def connect(self) -> None:
+        """Connect to database."""
+        self._conn = await aiosqlite.connect(self._db_path)
+        self._conn.row_factory = aiosqlite.Row
+
+    async def close(self) -> None:
+        """Close database connection."""
+        if self._conn:
+            await self._conn.close()
+
+    def set_connection(self, conn: aiosqlite.Connection) -> None:
+        """Share connection from another repository."""
+        self._conn = conn
+
+    async def get_all(self, type: str) -> list[str]:
+        """Get all categories for a transaction type."""
+        async with self._conn.execute(
+            "SELECT name FROM categories WHERE type = ? ORDER BY sort_order, name",
+            (type,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [row["name"] for row in rows]
+
+    async def add(self, type: str, name: str) -> None:
+        """Add a category."""
+        # Get max sort_order for this type
+        async with self._conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM categories WHERE type = ?",
+            (type,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            sort_order = row["next_order"]
+
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO categories (type, name, sort_order) VALUES (?, ?, ?)",
+            (type, name, sort_order),
+        )
+        await self._conn.commit()
+
+    async def remove(self, type: str, name: str) -> bool:
+        """Remove a category."""
+        cursor = await self._conn.execute(
+            "DELETE FROM categories WHERE type = ? AND name = ?",
+            (type, name),
+        )
+        await self._conn.commit()
+        return cursor.rowcount > 0
+
+    async def set_all(self, type: str, names: list[str]) -> None:
+        """Replace all categories for a type."""
+        # Delete existing
+        await self._conn.execute("DELETE FROM categories WHERE type = ?", (type,))
+
+        # Insert new with sort order
+        for i, name in enumerate(names):
+            await self._conn.execute(
+                "INSERT INTO categories (type, name, sort_order) VALUES (?, ?, ?)",
+                (type, name, i),
+            )
+
+        await self._conn.commit()

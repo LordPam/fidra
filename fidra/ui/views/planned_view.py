@@ -244,11 +244,17 @@ class PlannedView(QWidget):
         sheets = self._context.state.sheets.value
         available_sheets = self._get_ordered_sheet_names(sheets)
 
+        # Pre-load categories to avoid async re-entrancy issues
+        income_categories = await self._context.get_categories("income")
+        expense_categories = await self._context.get_categories("expense")
+
         dialog = AddPlannedDialog(
             current_sheet,
             self,
             available_sheets=available_sheets,
             context=self._context,
+            income_categories=income_categories,
+            expense_categories=expense_categories,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             template = dialog.get_template()
@@ -280,12 +286,18 @@ class PlannedView(QWidget):
         sheets = self._context.state.sheets.value
         available_sheets = self._get_ordered_sheet_names(sheets)
 
+        # Pre-load categories to avoid async re-entrancy issues
+        income_categories = await self._context.get_categories("income")
+        expense_categories = await self._context.get_categories("expense")
+
         # Show edit dialog
         dialog = EditPlannedDialog(
             template,
             self,
             available_sheets=available_sheets,
             context=self._context,
+            income_categories=income_categories,
+            expense_categories=expense_categories,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             edited = dialog.get_edited_template()

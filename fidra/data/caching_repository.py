@@ -1,0 +1,378 @@
+"""Caching repository wrappers for cloud backends.
+
+Wraps cloud repositories with local SQLite cache for:
+- Faster reads (no network round-trip)
+- Offline capability (read from cache when disconnected)
+- Optimistic updates (write locally first, sync in background)
+"""
+
+import logging
+from typing import Optional, TYPE_CHECKING
+from uuid import UUID
+
+from fidra.data.repository import (
+    TransactionRepository,
+    PlannedRepository,
+    SheetRepository,
+    AttachmentRepository,
+    AuditRepository,
+    CategoryRepository,
+)
+from fidra.domain.models import (
+    Transaction,
+    PlannedTemplate,
+    Sheet,
+    Attachment,
+    AuditEntry,
+)
+
+if TYPE_CHECKING:
+    from fidra.services.connection_state import ConnectionStateService
+    from fidra.data.sync_queue import SyncQueue
+
+logger = logging.getLogger(__name__)
+
+
+class CachingTransactionRepository(TransactionRepository):
+    """Transaction repository with local SQLite caching.
+
+    Reads from local cache for fast access.
+    Writes go to local cache first, then queued for cloud sync.
+    """
+
+    def __init__(
+        self,
+        cloud_repo: TransactionRepository,
+        local_repo: TransactionRepository,
+        sync_queue: Optional["SyncQueue"] = None,
+        connection_state: Optional["ConnectionStateService"] = None,
+    ):
+        """Initialize caching repository.
+
+        Args:
+            cloud_repo: Cloud (PostgreSQL) repository
+            local_repo: Local (SQLite) cache repository
+            sync_queue: Optional queue for pending sync operations
+            connection_state: Optional connection state service
+        """
+        self._cloud = cloud_repo
+        self._local = local_repo
+        self._sync_queue = sync_queue
+        self._connection_state = connection_state
+        self._cache_initialized = False
+
+    async def initialize_cache(self) -> None:
+        """Initialize local cache from cloud data.
+
+        Call this once after connection is established.
+        """
+        if self._cache_initialized:
+            return
+
+        logger.info("Initializing transaction cache from cloud...")
+        try:
+            # Fetch all from cloud
+            transactions = await self._cloud.get_all()
+
+            # Clear and repopulate local cache
+            for trans in transactions:
+                await self._local.save(trans)
+
+            self._cache_initialized = True
+            logger.info(f"Transaction cache initialized with {len(transactions)} items")
+        except Exception as e:
+            logger.error(f"Failed to initialize cache: {e}")
+            raise
+
+    async def get_all(self, sheet: Optional[str] = None) -> list[Transaction]:
+        """Get all transactions from local cache."""
+        return await self._local.get_all(sheet)
+
+    async def get_by_id(self, id: UUID) -> Optional[Transaction]:
+        """Get transaction by ID from local cache."""
+        return await self._local.get_by_id(id)
+
+    async def save(self, transaction: Transaction) -> Transaction:
+        """Save transaction to local cache and queue for sync.
+
+        Args:
+            transaction: Transaction to save
+
+        Returns:
+            Saved transaction
+        """
+        # Save to local cache immediately
+        print(f"[CACHE] Saving transaction {transaction.id} to local cache...")
+        result = await self._local.save(transaction)
+        print(f"[CACHE] Local save complete")
+
+        # Queue for cloud sync
+        if self._sync_queue:
+            print(f"[CACHE] Queueing transaction {transaction.id} for sync...")
+            await self._sync_queue.enqueue_save("transaction", transaction)
+            print(f"[CACHE] Queued for sync")
+        else:
+            print(f"[CACHE] WARNING: No sync queue available!")
+
+        return result
+
+    async def delete(self, id: UUID) -> None:
+        """Delete transaction from local cache and queue for sync."""
+        print(f"[CACHE] Deleting transaction {id} from local cache...")
+        # Delete from local cache
+        await self._local.delete(id)
+        print(f"[CACHE] Local delete complete")
+
+        # Queue for cloud sync
+        if self._sync_queue:
+            print(f"[CACHE] Queueing delete for sync...")
+            await self._sync_queue.enqueue_delete("transaction", id)
+            print(f"[CACHE] Delete queued for sync")
+
+    async def bulk_save(self, transactions: list[Transaction]) -> None:
+        """Bulk save transactions to local cache and queue for sync."""
+        await self._local.bulk_save(transactions)
+
+        if self._sync_queue:
+            for trans in transactions:
+                await self._sync_queue.enqueue_save("transaction", trans)
+
+    async def bulk_delete(self, ids: list[UUID]) -> None:
+        """Bulk delete transactions from local cache and queue for sync."""
+        await self._local.bulk_delete(ids)
+
+        if self._sync_queue:
+            for id in ids:
+                await self._sync_queue.enqueue_delete("transaction", id)
+
+    async def get_version(self, id: UUID) -> Optional[int]:
+        """Get current version from local cache."""
+        return await self._local.get_version(id)
+
+    async def close(self) -> None:
+        """Close both repositories."""
+        await self._local.close()
+        # Cloud repo closed separately via CloudConnection
+
+    async def refresh_from_cloud(self) -> int:
+        """Refresh local cache from cloud.
+
+        Returns:
+            Number of items refreshed
+        """
+        transactions = await self._cloud.get_all()
+        for trans in transactions:
+            await self._local.save(trans, force=True)
+        return len(transactions)
+
+    async def sync_to_cloud(self, transaction: Transaction) -> Transaction:
+        """Sync a specific transaction to cloud (for sync service).
+
+        Returns:
+            Updated transaction from cloud (with new version)
+        """
+        return await self._cloud.save(transaction)
+
+    async def delete_from_cloud(self, id: UUID) -> None:
+        """Delete from cloud (for sync service)."""
+        await self._cloud.delete(id)
+
+
+class CachingPlannedRepository(PlannedRepository):
+    """Planned template repository with local SQLite caching."""
+
+    def __init__(
+        self,
+        cloud_repo: PlannedRepository,
+        local_repo: PlannedRepository,
+        sync_queue: Optional["SyncQueue"] = None,
+        connection_state: Optional["ConnectionStateService"] = None,
+    ):
+        self._cloud = cloud_repo
+        self._local = local_repo
+        self._sync_queue = sync_queue
+        self._connection_state = connection_state
+        self._cache_initialized = False
+
+    async def initialize_cache(self) -> None:
+        """Initialize local cache from cloud data."""
+        if self._cache_initialized:
+            return
+
+        logger.info("Initializing planned templates cache from cloud...")
+        templates = await self._cloud.get_all()
+        for template in templates:
+            await self._local.save(template)
+        self._cache_initialized = True
+        logger.info(f"Planned cache initialized with {len(templates)} items")
+
+    async def get_all(self) -> list[PlannedTemplate]:
+        return await self._local.get_all()
+
+    async def get_by_id(self, id: UUID) -> Optional[PlannedTemplate]:
+        return await self._local.get_by_id(id)
+
+    async def save(self, template: PlannedTemplate) -> PlannedTemplate:
+        result = await self._local.save(template)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_save("planned_template", template)
+        return result
+
+    async def delete(self, id: UUID) -> None:
+        await self._local.delete(id)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_delete("planned_template", id)
+
+    async def get_version(self, id: UUID) -> Optional[int]:
+        return await self._local.get_version(id)
+
+    async def close(self) -> None:
+        await self._local.close()
+
+    async def refresh_from_cloud(self) -> int:
+        templates = await self._cloud.get_all()
+        for template in templates:
+            await self._local.save(template)
+        return len(templates)
+
+    async def sync_to_cloud(self, template: PlannedTemplate) -> PlannedTemplate:
+        return await self._cloud.save(template)
+
+    async def delete_from_cloud(self, id: UUID) -> None:
+        await self._cloud.delete(id)
+
+
+class CachingSheetRepository(SheetRepository):
+    """Sheet repository with local SQLite caching."""
+
+    def __init__(
+        self,
+        cloud_repo: SheetRepository,
+        local_repo: SheetRepository,
+        sync_queue: Optional["SyncQueue"] = None,
+        connection_state: Optional["ConnectionStateService"] = None,
+    ):
+        self._cloud = cloud_repo
+        self._local = local_repo
+        self._sync_queue = sync_queue
+        self._connection_state = connection_state
+        self._cache_initialized = False
+
+    async def initialize_cache(self) -> None:
+        """Initialize local cache from cloud data."""
+        if self._cache_initialized:
+            return
+
+        logger.info("Initializing sheets cache from cloud...")
+        sheets = await self._cloud.get_all()
+        for sheet in sheets:
+            await self._local.save(sheet)
+        self._cache_initialized = True
+        logger.info(f"Sheets cache initialized with {len(sheets)} items")
+
+    async def get_all(self) -> list[Sheet]:
+        return await self._local.get_all()
+
+    async def get_by_id(self, id: UUID) -> Optional[Sheet]:
+        return await self._local.get_by_id(id)
+
+    async def get_by_name(self, name: str) -> Optional[Sheet]:
+        return await self._local.get_by_name(name)
+
+    async def create(self, name: str, **kwargs) -> Sheet:
+        result = await self._local.create(name, **kwargs)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_save("sheet", result)
+        return result
+
+    async def save(self, sheet: Sheet) -> Sheet:
+        result = await self._local.save(sheet)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_save("sheet", sheet)
+        return result
+
+    async def delete(self, id: UUID) -> None:
+        await self._local.delete(id)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_delete("sheet", id)
+
+    async def close(self) -> None:
+        await self._local.close()
+
+    async def refresh_from_cloud(self) -> int:
+        sheets = await self._cloud.get_all()
+        for sheet in sheets:
+            await self._local.save(sheet)
+        return len(sheets)
+
+    async def sync_to_cloud(self, sheet: Sheet) -> Sheet:
+        return await self._cloud.save(sheet)
+
+    async def delete_from_cloud(self, id: UUID) -> None:
+        await self._cloud.delete(id)
+
+
+class CachingCategoryRepository(CategoryRepository):
+    """Category repository with local SQLite caching."""
+
+    def __init__(
+        self,
+        cloud_repo: CategoryRepository,
+        local_repo: CategoryRepository,
+        sync_queue: Optional["SyncQueue"] = None,
+        connection_state: Optional["ConnectionStateService"] = None,
+    ):
+        self._cloud = cloud_repo
+        self._local = local_repo
+        self._sync_queue = sync_queue
+        self._connection_state = connection_state
+        self._cache_initialized = False
+
+    async def initialize_cache(self) -> None:
+        """Initialize local cache from cloud data."""
+        if self._cache_initialized:
+            return
+
+        logger.info("Initializing categories cache from cloud...")
+        income_cats = await self._cloud.get_all("income")
+        expense_cats = await self._cloud.get_all("expense")
+        await self._local.set_all("income", income_cats)
+        await self._local.set_all("expense", expense_cats)
+        self._cache_initialized = True
+        logger.info(
+            f"Categories cache initialized: {len(income_cats)} income, {len(expense_cats)} expense"
+        )
+
+    async def get_all(self, type: str) -> list[str]:
+        return await self._local.get_all(type)
+
+    async def add(self, type: str, name: str) -> None:
+        await self._local.add(type, name)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_category_add(name, type)
+
+    async def remove(self, type: str, name: str) -> bool:
+        result = await self._local.remove(type, name)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_category_remove(name, type)
+        return result
+
+    async def set_all(self, type: str, names: list[str]) -> None:
+        await self._local.set_all(type, names)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_category_reorder(names, type)
+
+    async def close(self) -> None:
+        await self._local.close()
+
+    def set_connection(self, conn) -> None:
+        """Set connection for local repo."""
+        self._local.set_connection(conn)
+
+    async def refresh_from_cloud(self) -> int:
+        income_cats = await self._cloud.get_all("income")
+        expense_cats = await self._cloud.get_all("expense")
+        # Clear and repopulate
+        await self._local.set_all("income", income_cats)
+        await self._local.set_all("expense", expense_cats)
+        return len(income_cats) + len(expense_cats)

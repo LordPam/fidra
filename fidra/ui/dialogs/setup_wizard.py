@@ -26,6 +26,7 @@ DEEP_NAVY = "#0D1F2F"
 GOLD = "#BFA159"
 LIGHT_GRAY = "#D3D3D3"
 MID_GRAY = "#A9A9A9"
+CLOUD_ACCENT = "#60A5FA"
 
 
 def get_resource_path(relative_path: str) -> Path:
@@ -67,6 +68,7 @@ class SetupWizard(QDialog):
 
         # Result data
         self._db_path: Optional[Path] = None
+        self._cloud_server = None  # CloudServerConfig if user chose cloud
         self._name: str = ""
         self._initials: str = ""
 
@@ -286,6 +288,51 @@ class SetupWizard(QDialog):
         open_layout.addWidget(open_btn, alignment=Qt.AlignLeft)
 
         layout.addWidget(open_card)
+
+        layout.addSpacing(8)
+
+        # Connect to Cloud card
+        cloud_card = QFrame()
+        cloud_card.setStyleSheet(f"""
+            QFrame {{
+                background: {NAVY};
+                border: 1px solid {CLOUD_ACCENT};
+                border-radius: 8px;
+            }}
+        """)
+        cloud_layout = QVBoxLayout(cloud_card)
+        cloud_layout.setContentsMargins(16, 14, 16, 14)
+        cloud_layout.setSpacing(6)
+
+        cloud_title = QLabel("Connect to Cloud Server")
+        cloud_title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {LIGHT_GRAY}; background: transparent; border: none;")
+        cloud_layout.addWidget(cloud_title)
+
+        cloud_desc = QLabel("Connect to a shared cloud database (Supabase)")
+        cloud_desc.setStyleSheet(f"font-size: 12px; color: {MID_GRAY}; background: transparent; border: none;")
+        cloud_layout.addWidget(cloud_desc)
+
+        cloud_btn = QPushButton("Configure Server...")
+        cloud_btn.setMinimumHeight(32)
+        cloud_btn.setCursor(Qt.PointingHandCursor)
+        cloud_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {CLOUD_ACCENT};
+                color: {DEEP_NAVY};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background: #93C5FD;
+            }}
+        """)
+        cloud_btn.clicked.connect(self._configure_cloud_server)
+        cloud_layout.addWidget(cloud_btn, alignment=Qt.AlignLeft)
+
+        layout.addWidget(cloud_card)
 
         layout.addStretch(1)
 
@@ -509,6 +556,7 @@ class SetupWizard(QDialog):
 
         if file_path:
             self._db_path = Path(file_path)
+            self._cloud_server = None  # Clear any cloud config
             self.db_path_label.setText(f"New database: {self._db_path}")
             self.db_path_label.show()
             self.db_next_btn.setEnabled(True)
@@ -528,7 +576,20 @@ class SetupWizard(QDialog):
 
         if file_path:
             self._db_path = Path(file_path)
+            self._cloud_server = None  # Clear any cloud config
             self.db_path_label.setText(f"Selected: {self._db_path}")
+            self.db_path_label.show()
+            self.db_next_btn.setEnabled(True)
+
+    def _configure_cloud_server(self) -> None:
+        """Show dialog to configure a cloud server."""
+        from fidra.ui.dialogs.cloud_server_dialog import CloudServerDialog
+
+        dialog = CloudServerDialog(parent=self)
+        if dialog.exec():
+            self._cloud_server = dialog.get_server_config()
+            self._db_path = None  # Clear any local path
+            self.db_path_label.setText(f"Cloud: {self._cloud_server.name}")
             self.db_path_label.show()
             self.db_next_btn.setEnabled(True)
 
@@ -565,8 +626,18 @@ class SetupWizard(QDialog):
 
     @property
     def db_path(self) -> Optional[Path]:
-        """Get the selected database path."""
+        """Get the selected database path (None if cloud server selected)."""
         return self._db_path
+
+    @property
+    def cloud_server(self):
+        """Get the configured cloud server (None if local file selected)."""
+        return self._cloud_server
+
+    @property
+    def is_cloud(self) -> bool:
+        """Check if user chose cloud server."""
+        return self._cloud_server is not None
 
     @property
     def user_name(self) -> str:

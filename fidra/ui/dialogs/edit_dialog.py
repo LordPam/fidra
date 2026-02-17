@@ -1,14 +1,15 @@
 """Edit transaction dialog."""
 
-import asyncio
 import subprocess
 import sys
+import tempfile
+import threading
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 import qasync
-from PySide6.QtCore import QDate, Qt, QStringListModel, QTimer
+from PySide6.QtCore import QDate, Qt, QStringListModel, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -42,12 +43,20 @@ class EditTransactionDialog(QDialog):
     with pre-populated fields.
     """
 
+    # Internal signals for async operations (to work with qasync)
+    _trigger_load_categories = Signal()
+    _trigger_load_attachments = Signal()
+    _file_ready_to_open = Signal(str)  # Emitted from download thread with temp file path
+
     def __init__(
         self,
         transaction: Transaction,
         parent=None,
         available_sheets: Optional[list[str]] = None,
-        context: Optional["ApplicationContext"] = None
+        context: Optional["ApplicationContext"] = None,
+        income_categories: Optional[list[str]] = None,
+        expense_categories: Optional[list[str]] = None,
+        attachments: Optional[list] = None,
     ):
         """Initialize the edit dialog.
 
@@ -56,21 +65,38 @@ class EditTransactionDialog(QDialog):
             parent: Parent widget
             available_sheets: List of available sheet names (for sheet selector)
             context: Application context for autocomplete data
+            income_categories: Pre-loaded income categories (avoids async loading)
+            expense_categories: Pre-loaded expense categories (avoids async loading)
+            attachments: Pre-loaded attachments (avoids async loading)
         """
         super().__init__(parent)
         self._original_transaction = transaction
         self._edited_transaction: Optional[Transaction] = None
         self._available_sheets = available_sheets or []
         self._context = context
-        self._attachments_task: Optional[asyncio.Task] = None
+        self._preloaded_attachments = attachments
+
+        # Category cache - use pre-loaded if provided
+        self._income_categories: list[str] = income_categories or []
+        self._expense_categories: list[str] = expense_categories or []
+        self._categories_loaded = bool(income_categories or expense_categories)
 
         self.setWindowTitle("Edit Transaction")
         self.setModal(True)
         self.setMinimumWidth(500)
 
+        # Connect internal signals to async handlers
+        self._trigger_load_categories.connect(self._handle_load_categories)
+        self._trigger_load_attachments.connect(self._handle_load_attachments)
+        self._file_ready_to_open.connect(lambda p: self._open_file(Path(p)))
+
         self._setup_ui()
         self._setup_completers()
         self._populate_fields()
+
+        # Load categories from database only if not pre-loaded
+        if not self._categories_loaded:
+            QTimer.singleShot(0, self._start_load_categories)
 
     def _setup_ui(self) -> None:
         """Set up the dialog UI - compact 2-column layout."""
@@ -201,10 +227,15 @@ class EditTransactionDialog(QDialog):
             self.attachment_list.itemDoubleClicked.connect(self._on_attachment_open)
             layout.addWidget(self.attachment_list)
 
-            # Load existing attachments (deferred to avoid qasync re-entrancy)
+            # Attachment tracking
             self._pending_new_files: list[Path] = []
             self._pending_remove_ids: list = []
-            QTimer.singleShot(0, self._start_load_attachments)
+
+            # Use pre-loaded attachments if available, otherwise load async
+            if self._preloaded_attachments is not None:
+                self._populate_attachments(self._preloaded_attachments)
+            else:
+                QTimer.singleShot(0, self._start_load_attachments)
 
         # ===== BUTTONS =====
         button_box = QDialogButtonBox(
@@ -218,18 +249,46 @@ class EditTransactionDialog(QDialog):
         self.type_group.buttonClicked.connect(self._update_category_list)
         self.type_group.buttonClicked.connect(self._update_status_options)
 
+    def _start_load_categories(self) -> None:
+        """Start loading categories from database."""
+        if self._context:
+            self._trigger_load_categories.emit()
+
+    @qasync.asyncSlot()
+    async def _handle_load_categories(self) -> None:
+        """Handle async category loading (via signal)."""
+        try:
+            await self._load_categories()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                pass  # Ignore qasync re-entrancy, fall back to defaults
+        except Exception:
+            pass  # Fall back to defaults on error
+
+    async def _load_categories(self) -> None:
+        """Load categories from database asynchronously."""
+        try:
+            self._income_categories = await self._context.get_categories("income")
+            self._expense_categories = await self._context.get_categories("expense")
+            self._categories_loaded = True
+            # Update the category dropdown with loaded categories
+            self._update_category_list()
+        except Exception:
+            # Fall back to defaults on error
+            self._categories_loaded = True
+
     def _update_category_list(self) -> None:
         """Update category dropdown based on selected type."""
         is_expense = self.expense_btn.isChecked()
 
-        # Get categories from settings if context is available, otherwise use defaults
-        if self._context:
+        # Get categories from cache if loaded, otherwise use defaults
+        if self._categories_loaded and self._context:
             if is_expense:
-                categories = self._context.settings.expense_categories.copy()
+                categories = self._expense_categories.copy()
             else:
-                categories = self._context.settings.income_categories.copy()
+                categories = self._income_categories.copy()
         else:
-            # Fallback defaults
+            # Fallback defaults (used before async load completes)
             if is_expense:
                 categories = [
                     "Equipment",
@@ -484,14 +543,31 @@ class EditTransactionDialog(QDialog):
         if not self._context or not self._context.attachment_service:
             return
 
-        if self._attachments_task and not self._attachments_task.done():
-            self._attachments_task.cancel()
+        self._trigger_load_attachments.emit()
 
+    @qasync.asyncSlot()
+    async def _handle_load_attachments(self) -> None:
+        """Handle async attachment loading (via signal)."""
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = qasync.get_event_loop()
-        self._attachments_task = loop.create_task(self._load_attachments())
+            await self._load_attachments()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                pass  # Ignore qasync re-entrancy
+        except Exception:
+            pass  # Silently handle - attachments are optional
+
+    def _populate_attachments(self, attachments: list) -> None:
+        """Populate attachment list with pre-loaded attachments."""
+        print(f"[ATTACH] Populating {len(attachments)} attachments in dialog")
+        self.attachment_list.clear()
+        for att in attachments:
+            if self._context and self._context.attachment_service:
+                size_str = self._context.attachment_service.format_file_size(att.file_size)
+            else:
+                size_str = f"{att.file_size} B"
+            item = QListWidgetItem(f"{att.stored_name}  ({size_str})")
+            item.setData(Qt.ItemDataRole.UserRole, att)
+            self.attachment_list.addItem(item)
 
     async def _load_attachments(self) -> None:
         """Load existing attachments for this transaction."""
@@ -502,19 +578,12 @@ class EditTransactionDialog(QDialog):
             attachments = await self._context.attachment_service.get_attachments(
                 self._original_transaction.id
             )
-            self.attachment_list.clear()
-            for att in attachments:
-                size_str = self._context.attachment_service.format_file_size(att.file_size)
-                item = QListWidgetItem(f"{att.stored_name}  ({size_str})")
-                item.setData(Qt.ItemDataRole.UserRole, att)
-                self.attachment_list.addItem(item)
+            self._populate_attachments(attachments)
         except Exception:
             pass  # Silently handle - attachments are optional
 
     def closeEvent(self, event) -> None:
-        """Ensure any attachment task is cancelled on close."""
-        if self._attachments_task and not self._attachments_task.done():
-            self._attachments_task.cancel()
+        """Clean up on close."""
         super().closeEvent(event)
 
     def _on_attach_file(self) -> None:
@@ -570,6 +639,7 @@ class EditTransactionDialog(QDialog):
     def _on_attachment_open(self, item: QListWidgetItem) -> None:
         """Handle double-click to open attachment."""
         data = item.data(Qt.ItemDataRole.UserRole)
+        print(f"[ATTACH] Double-click: data type={type(data).__name__}, is Attachment={isinstance(data, Attachment)}")
         if isinstance(data, Attachment):
             self._open_attachment(data)
         elif isinstance(data, Path):
@@ -577,13 +647,58 @@ class EditTransactionDialog(QDialog):
 
     def _open_attachment(self, attachment: Attachment) -> None:
         """Open an existing attachment with the system default application."""
+        print(f"[ATTACH] _open_attachment called for: {attachment.stored_name}")
         if not self._context or not self._context.attachment_service:
+            print("[ATTACH] No context or attachment service")
             return
-        file_path = self._context.attachment_service.get_file_path(attachment)
-        self._open_file(file_path)
+
+        service = self._context.attachment_service
+        has_signed = hasattr(service, 'get_signed_url')
+        print(f"[ATTACH] Service type={type(service).__name__}, has_signed_url={has_signed}")
+
+        # Check if this is a cloud service (has get_signed_url method)
+        if has_signed:
+            # Download in background thread to avoid blocking UI and
+            # bypass qasync limitations inside modal dialog.exec()
+            print("[ATTACH] Starting download thread...")
+            threading.Thread(
+                target=self._download_and_open_attachment,
+                args=(service, attachment),
+                daemon=True,
+            ).start()
+        else:
+            # Local attachment - use file path directly
+            file_path = service.get_file_path(attachment)
+            self._open_file(file_path)
+
+    def _download_and_open_attachment(self, service, attachment: Attachment) -> None:
+        """Download a cloud attachment in a background thread and open it."""
+        import asyncio
+
+        print(f"[ATTACH] Thread started, downloading: {attachment.stored_name}")
+        loop = asyncio.new_event_loop()
+        try:
+            file_content = loop.run_until_complete(service.download_file(attachment))
+            print(f"[ATTACH] Downloaded {len(file_content)} bytes")
+
+            # Save to temp file with original extension
+            suffix = Path(attachment.filename).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(file_content)
+                tmp_path = Path(tmp.name)
+
+            print(f"[ATTACH] Saved to {tmp_path}, opening...")
+            # Signal main thread to open file (signals are thread-safe, QTimer is not)
+            self._file_ready_to_open.emit(str(tmp_path))
+        except Exception as e:
+            print(f"[ATTACH] Error downloading attachment: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            loop.close()
 
     def _open_file(self, path: Path) -> None:
-        """Open a file with the system default application."""
+        """Open a local file with the system default application."""
         if not path.exists():
             return
         if sys.platform == "darwin":
@@ -592,6 +707,11 @@ class EditTransactionDialog(QDialog):
             subprocess.Popen(["start", "", str(path)], shell=True)
         else:
             subprocess.Popen(["xdg-open", str(path)])
+
+    def _open_url(self, url: str) -> None:
+        """Open a URL in the system default browser."""
+        import webbrowser
+        webbrowser.open(url)
 
     def _remove_attachment(self, item: QListWidgetItem, attachment: Attachment) -> None:
         """Mark an existing attachment for removal."""

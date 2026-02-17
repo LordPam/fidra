@@ -567,7 +567,13 @@ class FidraPDFGenerator:
         story = []
 
         # Sort transactions
-        sorted_trans = sorted(transactions, key=lambda t: (t.date, t.created_at))
+        # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+        def sort_key(t):
+            created = t.created_at
+            if created and created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
+            return (t.date, created)
+        sorted_trans = sorted(transactions, key=sort_key)
 
         # Report header with metadata
         story.extend(self._build_report_header(title, sorted_trans, start_date, end_date))

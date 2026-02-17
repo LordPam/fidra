@@ -1,9 +1,12 @@
-"""Supabase/PostgreSQL implementation of repository interfaces using asyncpg."""
+"""PostgreSQL implementation of repository interfaces using asyncpg.
+
+Works with any PostgreSQL database (Supabase, self-hosted, etc.)
+"""
 
 import json
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union, TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
@@ -11,6 +14,7 @@ import asyncpg
 from fidra.data.repository import (
     AttachmentRepository,
     AuditRepository,
+    CategoryRepository,
     ConcurrencyError,
     PlannedRepository,
     SheetRepository,
@@ -28,12 +32,30 @@ from fidra.domain.models import (
     TransactionType,
 )
 
+if TYPE_CHECKING:
+    from fidra.data.cloud_connection import CloudConnection
 
-class SupabaseTransactionRepository(TransactionRepository):
-    """PostgreSQL/Supabase implementation of TransactionRepository."""
 
-    def __init__(self, pool: asyncpg.Pool):
-        self._pool = pool
+class PostgresTransactionRepository(TransactionRepository):
+    """PostgreSQL implementation of TransactionRepository."""
+
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        """Initialize with either a pool or CloudConnection.
+
+        Args:
+            pool_or_connection: Either an asyncpg.Pool directly, or a CloudConnection
+                                that provides dynamic pool access (preferred for reconnection support)
+        """
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        """Get the current pool, supporting both direct pool and CloudConnection."""
+        if hasattr(self._pool_or_connection, 'pool'):
+            # It's a CloudConnection - get current pool
+            return self._pool_or_connection.pool
+        # It's a direct pool reference
+        return self._pool_or_connection
 
     async def get_all(self, sheet: Optional[str] = None) -> list[Transaction]:
         """Get all transactions, optionally filtered by sheet."""
@@ -163,11 +185,17 @@ class SupabaseTransactionRepository(TransactionRepository):
         )
 
 
-class SupabasePlannedRepository(PlannedRepository):
-    """PostgreSQL/Supabase implementation of PlannedRepository."""
+class PostgresPlannedRepository(PlannedRepository):
+    """PostgreSQL implementation of PlannedRepository."""
 
-    def __init__(self, pool: asyncpg.Pool):
-        self._pool = pool
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        if hasattr(self._pool_or_connection, 'pool'):
+            return self._pool_or_connection.pool
+        return self._pool_or_connection
 
     async def get_all(self) -> list[PlannedTemplate]:
         """Get all planned templates."""
@@ -279,11 +307,17 @@ class SupabasePlannedRepository(PlannedRepository):
         )
 
 
-class SupabaseSheetRepository(SheetRepository):
-    """PostgreSQL/Supabase implementation of SheetRepository."""
+class PostgresSheetRepository(SheetRepository):
+    """PostgreSQL implementation of SheetRepository."""
 
-    def __init__(self, pool: asyncpg.Pool):
-        self._pool = pool
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        if hasattr(self._pool_or_connection, 'pool'):
+            return self._pool_or_connection.pool
+        return self._pool_or_connection
 
     async def get_all(self) -> list[Sheet]:
         """Get all sheets."""
@@ -358,11 +392,17 @@ class SupabaseSheetRepository(SheetRepository):
         )
 
 
-class SupabaseAttachmentRepository(AttachmentRepository):
-    """PostgreSQL/Supabase implementation of AttachmentRepository."""
+class PostgresAttachmentRepository(AttachmentRepository):
+    """PostgreSQL implementation of AttachmentRepository."""
 
-    def __init__(self, pool: asyncpg.Pool):
-        self._pool = pool
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        if hasattr(self._pool_or_connection, 'pool'):
+            return self._pool_or_connection.pool
+        return self._pool_or_connection
 
     async def save(self, attachment: Attachment) -> Attachment:
         """Save an attachment record."""
@@ -431,11 +471,17 @@ class SupabaseAttachmentRepository(AttachmentRepository):
         )
 
 
-class SupabaseAuditRepository(AuditRepository):
-    """PostgreSQL/Supabase implementation of AuditRepository."""
+class PostgresAuditRepository(AuditRepository):
+    """PostgreSQL implementation of AuditRepository."""
 
-    def __init__(self, pool: asyncpg.Pool):
-        self._pool = pool
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        if hasattr(self._pool_or_connection, 'pool'):
+            return self._pool_or_connection.pool
+        return self._pool_or_connection
 
     async def log(self, entry: AuditEntry) -> None:
         """Write an audit log entry."""
@@ -506,3 +552,78 @@ class SupabaseAuditRepository(AuditRepository):
             summary=row["summary"],
             details=row["details"],
         )
+
+
+class PostgresCategoryRepository(CategoryRepository):
+    """PostgreSQL implementation of CategoryRepository."""
+
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        if hasattr(self._pool_or_connection, 'pool'):
+            return self._pool_or_connection.pool
+        return self._pool_or_connection
+
+    async def ensure_table(self) -> None:
+        """Ensure the categories table exists."""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS categories (
+                    id SERIAL PRIMARY KEY,
+                    type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+                    name TEXT NOT NULL,
+                    sort_order INTEGER DEFAULT 0,
+                    UNIQUE(type, name)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type)"
+            )
+
+    async def get_all(self, type: str) -> list[str]:
+        """Get all categories for a transaction type."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT name FROM categories WHERE type = $1 ORDER BY sort_order, name",
+                type,
+            )
+            return [row["name"] for row in rows]
+
+    async def add(self, type: str, name: str) -> None:
+        """Add a category."""
+        async with self._pool.acquire() as conn:
+            # Get max sort_order for this type
+            row = await conn.fetchrow(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM categories WHERE type = $1",
+                type,
+            )
+            sort_order = row["next_order"]
+
+            await conn.execute(
+                "INSERT INTO categories (type, name, sort_order) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                type, name, sort_order,
+            )
+
+    async def remove(self, type: str, name: str) -> bool:
+        """Remove a category."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM categories WHERE type = $1 AND name = $2",
+                type, name,
+            )
+            return result == "DELETE 1"
+
+    async def set_all(self, type: str, names: list[str]) -> None:
+        """Replace all categories for a type."""
+        async with self._pool.acquire() as conn:
+            # Delete existing
+            await conn.execute("DELETE FROM categories WHERE type = $1", type)
+
+            # Insert new with sort order
+            for i, name in enumerate(names):
+                await conn.execute(
+                    "INSERT INTO categories (type, name, sort_order) VALUES ($1, $2, $3)",
+                    type, name, i,
+                )

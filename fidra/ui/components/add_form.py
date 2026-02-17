@@ -4,7 +4,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional, TYPE_CHECKING
 
-from PySide6.QtCore import Signal, QDate, Qt
+import qasync
+from PySide6.QtCore import Signal, QDate, Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -40,6 +41,8 @@ class AddTransactionForm(QWidget):
 
     # Signal emitted when form is submitted
     transaction_added = Signal(Transaction)
+    # Internal signal for async category loading (to work with qasync)
+    _trigger_load_categories = Signal()
 
     def __init__(self, sheet: str = "Main", parent=None, context: Optional["ApplicationContext"] = None):
         """Initialize the add form.
@@ -54,8 +57,20 @@ class AddTransactionForm(QWidget):
         self._is_all_sheets_mode = False
         self._available_sheets: list[str] = []
         self._context = context
+
+        # Category cache - loaded from database asynchronously
+        self._income_categories: list[str] = []
+        self._expense_categories: list[str] = []
+        self._categories_loaded = False
+
+        # Connect internal signal to async handler
+        self._trigger_load_categories.connect(self._handle_load_categories)
+
         self._setup_ui()
         self._setup_completers()
+
+        # Load categories from database (deferred to avoid qasync re-entrancy)
+        QTimer.singleShot(0, self._start_load_categories)
 
     def _setup_ui(self) -> None:
         """Set up the form UI - elements spread to fill available space."""
@@ -187,18 +202,46 @@ class AddTransactionForm(QWidget):
         # Connect type button to category update
         self.type_group.buttonClicked.connect(self._update_category_list)
 
+    def _start_load_categories(self) -> None:
+        """Start loading categories from database."""
+        if self._context:
+            self._trigger_load_categories.emit()
+
+    @qasync.asyncSlot()
+    async def _handle_load_categories(self) -> None:
+        """Handle async category loading (via signal)."""
+        try:
+            await self._load_categories()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                pass  # Ignore qasync re-entrancy, fall back to defaults
+        except Exception:
+            pass  # Fall back to defaults on error
+
+    async def _load_categories(self) -> None:
+        """Load categories from database asynchronously."""
+        try:
+            self._income_categories = await self._context.get_categories("income")
+            self._expense_categories = await self._context.get_categories("expense")
+            self._categories_loaded = True
+            # Update the category dropdown with loaded categories
+            self._update_category_list()
+        except Exception:
+            # Fall back to defaults on error
+            self._categories_loaded = True
+
     def _update_category_list(self) -> None:
         """Update category dropdown based on selected type."""
         is_expense = self.expense_btn.isChecked()
 
-        # Get categories from settings if context is available, otherwise use defaults
-        if self._context:
+        # Get categories from cache if loaded, otherwise use defaults
+        if self._categories_loaded and self._context:
             if is_expense:
-                categories = self._context.settings.expense_categories.copy()
+                categories = self._expense_categories.copy()
             else:
-                categories = self._context.settings.income_categories.copy()
+                categories = self._income_categories.copy()
         else:
-            # Fallback defaults
+            # Fallback defaults (used before async load completes)
             if is_expense:
                 categories = [
                     "Equipment",

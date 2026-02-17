@@ -5,24 +5,58 @@ for accountability and traceability.
 """
 
 import json
+import logging
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from PySide6.QtCore import QTimer
+
 from fidra.data.repository import AuditRepository
 from fidra.domain.models import (
+    Attachment,
     AuditAction,
     AuditEntry,
     Transaction,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class AuditService:
     """Service for recording and querying audit trail entries."""
 
-    def __init__(self, audit_repo: AuditRepository, user: str = ""):
+    def __init__(self, audit_repo: AuditRepository, user: str = "", connection_state=None):
         self._repo = audit_repo
         self._user = user or "System"
+        self._connection_state = connection_state
+
+    async def _safe_log(self, entry: AuditEntry) -> None:
+        """Log an entry, silently handling network errors when offline."""
+        try:
+            await self._repo.log(entry)
+        except OSError as e:
+            # Network errors when offline - report and continue
+            logger.debug(f"Audit log skipped (offline): {entry.summary}")
+            self._report_network_error()
+        except Exception as e:
+            # Other errors - log warning but don't fail the operation
+            logger.warning(f"Audit log failed: {e}")
+            # Check if it looks like a network error
+            error_str = str(e).lower()
+            if "nodename" in error_str or "network" in error_str or "connection" in error_str:
+                self._report_network_error()
+
+    def _report_network_error(self) -> None:
+        """Report network error to connection state service if available.
+
+        Deferred via QTimer to avoid triggering Qt events during exception
+        handling, which can cause crashes when the exception's traceback
+        (holding Qt object references) is garbage collected.
+        """
+        if self._connection_state and hasattr(self._connection_state, 'report_network_error'):
+            # Defer to next event loop iteration to avoid Qt/GC lifecycle issues
+            QTimer.singleShot(0, self._connection_state.report_network_error)
 
     @property
     def user(self) -> str:
@@ -54,9 +88,12 @@ class AuditService:
                 "sheet": transaction.sheet,
                 "category": transaction.category,
                 "status": transaction.status.value,
+                "party": transaction.party,
+                "notes": transaction.notes,
+                "reference": transaction.reference,
             }),
         )
-        await self._repo.log(entry)
+        await self._safe_log(entry)
 
     async def log_transaction_updated(
         self, old: Transaction, new: Transaction
@@ -78,7 +115,7 @@ class AuditService:
             summary=summary,
             details=json.dumps(changes),
         )
-        await self._repo.log(entry)
+        await self._safe_log(entry)
 
     async def log_transaction_deleted(self, transaction: Transaction) -> None:
         """Log deletion of a transaction."""
@@ -94,7 +131,37 @@ class AuditService:
             user=self._user,
             summary=summary,
         )
-        await self._repo.log(entry)
+        await self._safe_log(entry)
+
+    async def log_attachment_added(
+        self, transaction: Transaction, filename: str
+    ) -> None:
+        """Log addition of an attachment to a transaction."""
+        summary = f"Added attachment '{filename}' to '{transaction.description}'"
+        entry = AuditEntry.create(
+            action=AuditAction.UPDATE,
+            entity_type="transaction",
+            entity_id=transaction.id,
+            user=self._user,
+            summary=summary,
+            details=json.dumps({"attachment_added": filename}),
+        )
+        await self._safe_log(entry)
+
+    async def log_attachment_removed(
+        self, transaction: Transaction, filename: str
+    ) -> None:
+        """Log removal of an attachment from a transaction."""
+        summary = f"Removed attachment '{filename}' from '{transaction.description}'"
+        entry = AuditEntry.create(
+            action=AuditAction.UPDATE,
+            entity_type="transaction",
+            entity_id=transaction.id,
+            user=self._user,
+            summary=summary,
+            details=json.dumps({"attachment_removed": filename}),
+        )
+        await self._safe_log(entry)
 
     async def log_generic(
         self,
@@ -113,7 +180,7 @@ class AuditService:
             summary=summary,
             details=details,
         )
-        await self._repo.log(entry)
+        await self._safe_log(entry)
 
     async def get_log(
         self,
@@ -141,7 +208,7 @@ def _diff_transactions(old: Transaction, new: Transaction) -> dict:
     """Compare two transactions and return a dict of changed fields."""
     changes = {}
     fields = ["description", "amount", "type", "date", "sheet", "category",
-              "party", "status", "notes"]
+              "party", "status", "notes", "reference"]
 
     for field in fields:
         old_val = getattr(old, field)

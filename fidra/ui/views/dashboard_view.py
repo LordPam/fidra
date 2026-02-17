@@ -3,9 +3,9 @@
 from typing import TYPE_CHECKING
 from datetime import date, timedelta
 from decimal import Decimal
-import asyncio
 
-from PySide6.QtCore import Qt
+import qasync
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -414,6 +414,10 @@ class DashboardView(QWidget):
     - Bottom: Activity lists (recent transactions, upcoming planned)
     """
 
+    # Internal signals for async operations (to work with qasync)
+    _trigger_set_status = Signal(object, object)  # transaction, status
+    _trigger_undo = Signal()
+
     def __init__(self, context: "ApplicationContext", parent=None):
         """Initialize dashboard view.
 
@@ -423,6 +427,11 @@ class DashboardView(QWidget):
         """
         super().__init__(parent)
         self._context = context
+
+        # Connect internal signals to async handlers
+        self._trigger_set_status.connect(self._handle_set_status)
+        self._trigger_undo.connect(self._handle_undo)
+
         self._setup_ui()
         self._connect_signals()
 
@@ -617,7 +626,13 @@ class DashboardView(QWidget):
             t for t in transactions
             if t.status not in (ApprovalStatus.PENDING, ApprovalStatus.REJECTED)
         ]
-        recent = sorted(recent_source, key=lambda t: (t.date, t.created_at), reverse=True)[:3]
+        # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+        def recent_sort_key(t):
+            created = t.created_at
+            if created and created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
+            return (t.date, created)
+        recent = sorted(recent_source, key=recent_sort_key, reverse=True)[:3]
         for t in recent:
             self.recent_list.add_item(
                 t.description,
@@ -669,7 +684,13 @@ class DashboardView(QWidget):
             if t.status == ApprovalStatus.PENDING
             and t.status != ApprovalStatus.PLANNED
         ]
-        pending.sort(key=lambda t: (t.date, t.created_at))
+        # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+        def sort_key(t):
+            created = t.created_at
+            if created and created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
+            return (t.date, created)
+        pending.sort(key=sort_key)
 
         self.pending_list.clear()
 
@@ -684,13 +705,31 @@ class DashboardView(QWidget):
             self.pending_list.ensure_spacer()
 
     def _approve_pending(self, transaction: Transaction) -> None:
-        asyncio.create_task(self._set_pending_status(transaction, ApprovalStatus.APPROVED))
+        self._trigger_set_status.emit(transaction, ApprovalStatus.APPROVED)
 
     def _reject_pending(self, transaction: Transaction) -> None:
-        asyncio.create_task(self._set_pending_status(transaction, ApprovalStatus.REJECTED))
+        self._trigger_set_status.emit(transaction, ApprovalStatus.REJECTED)
 
     def _on_undo_shortcut(self) -> None:
-        asyncio.create_task(self._undo_last_action())
+        self._trigger_undo.emit()
+
+    @qasync.asyncSlot(object, object)
+    async def _handle_set_status(self, transaction: Transaction, status: ApprovalStatus) -> None:
+        """Handle async set status (via signal)."""
+        try:
+            await self._set_pending_status(transaction, status)
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                raise
+
+    @qasync.asyncSlot()
+    async def _handle_undo(self) -> None:
+        """Handle async undo (via signal)."""
+        try:
+            await self._undo_last_action()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                raise
 
     async def _set_pending_status(self, transaction: Transaction, status: ApprovalStatus) -> None:
         """Approve or reject a pending transaction."""

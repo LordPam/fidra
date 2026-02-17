@@ -117,7 +117,9 @@ class BulkEditTransactionDialog(QDialog):
             type_layout.setSpacing(0)
 
             self.expense_btn = QPushButton("Expense")
+            self.expense_btn.setObjectName("type_expense")
             self.income_btn = QPushButton("Income")
+            self.income_btn.setObjectName("type_income")
 
             self.expense_btn.setCheckable(True)
             self.income_btn.setCheckable(True)

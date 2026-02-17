@@ -1,10 +1,13 @@
 """View transaction dialog (read-only details)."""
 
-import asyncio
+import sys
 from decimal import Decimal
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QTimer
+import qasync
+from PySide6.QtCore import Qt, QSize, QTimer, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -18,12 +21,24 @@ from PySide6.QtWidgets import (
 
 from fidra.domain.models import Transaction, TransactionType, ApprovalStatus
 
+
+def _icon_path(name: str) -> str:
+    """Get path to a theme icon."""
+    try:
+        base = Path(sys._MEIPASS)
+    except AttributeError:
+        base = Path(__file__).resolve().parent.parent
+    return str(base / "theme" / "icons" / name)
+
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
 
 
 class ViewTransactionDialog(QDialog):
     """Dialog for viewing a single transaction (read-only)."""
+
+    # Internal signal for async attachment loading (to work with qasync)
+    _trigger_load_attachments = Signal()
 
     def __init__(
         self,
@@ -34,7 +49,9 @@ class ViewTransactionDialog(QDialog):
         super().__init__(parent)
         self._transaction = transaction
         self._context = context
-        self._attachments_task: Optional[asyncio.Task] = None
+
+        # Connect internal signal to async handler
+        self._trigger_load_attachments.connect(self._handle_load_attachments)
 
         self.setWindowTitle("View Transaction")
         self.setModal(True)
@@ -47,9 +64,40 @@ class ViewTransactionDialog(QDialog):
         layout.setSpacing(14)
         layout.setContentsMargins(18, 18, 18, 18)
 
+        # Header row with copy button in the corner
+        header_row = QHBoxLayout()
         header = QLabel("Transaction Details")
         header.setObjectName("section_header")
-        layout.addWidget(header)
+        header_row.addWidget(header)
+        header_row.addStretch()
+
+        self._clipboard_icon = QIcon(_icon_path("clipboard.svg"))
+        self._clipboard_check_icon = QIcon(_icon_path("clipboard-check.svg"))
+
+        self._copy_btn = QPushButton()
+        self._copy_btn.setIcon(self._clipboard_icon)
+        self._copy_btn.setIconSize(QSize(18, 18))
+        self._copy_btn.setToolTip("Copy to clipboard")
+        self._copy_btn.setFixedSize(30, 30)
+        self._copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background: rgba(128, 128, 128, 0.15);
+                border-color: rgba(128, 128, 128, 0.3);
+            }
+            QPushButton:pressed {
+                background: rgba(128, 128, 128, 0.25);
+            }
+        """)
+        self._copy_btn.clicked.connect(self._copy_to_clipboard)
+        header_row.addWidget(self._copy_btn)
+        layout.addLayout(header_row)
 
         amount_value = QLabel(self._format_amount(self._transaction))
         amount_value.setObjectName("amount_value")
@@ -81,10 +129,6 @@ class ViewTransactionDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
-        copy_btn = QPushButton("Copy")
-        copy_btn.clicked.connect(self._copy_to_clipboard)
-        buttons.addButton(copy_btn, QDialogButtonBox.ButtonRole.ActionRole)
         layout.addWidget(buttons)
 
         if self._context and self._context.attachment_service:
@@ -128,12 +172,18 @@ class ViewTransactionDialog(QDialog):
     def _start_load_attachments(self) -> None:
         if not self._context or not self._context.attachment_service:
             return
+        self._trigger_load_attachments.emit()
 
-        if self._attachments_task and not self._attachments_task.done():
-            self._attachments_task.cancel()
-
-        loop = asyncio.get_event_loop()
-        self._attachments_task = loop.create_task(self._load_attachments())
+    @qasync.asyncSlot()
+    async def _handle_load_attachments(self) -> None:
+        """Handle async attachment loading (via signal)."""
+        try:
+            await self._load_attachments()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                pass  # Ignore qasync re-entrancy
+        except Exception:
+            pass  # Silently handle - attachments are optional
 
     async def _load_attachments(self) -> None:
         if not self._context or not self._context.attachment_service:
@@ -161,13 +211,14 @@ class ViewTransactionDialog(QDialog):
             self._attachments_value.setText(text)
 
     def closeEvent(self, event) -> None:
-        if self._attachments_task and not self._attachments_task.done():
-            self._attachments_task.cancel()
         super().closeEvent(event)
 
     def _copy_to_clipboard(self) -> None:
         """Copy a formatted summary to clipboard for sharing."""
         QApplication.clipboard().setText(self._format_for_clipboard())
+        # Brief visual feedback — swap to green check icon
+        self._copy_btn.setIcon(self._clipboard_check_icon)
+        QTimer.singleShot(1500, lambda: self._copy_btn.setIcon(self._clipboard_icon))
 
     def _format_for_clipboard(self) -> str:
         amount = self._format_amount(self._transaction)

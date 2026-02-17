@@ -1,4 +1,4 @@
-"""Data migration dialog for transferring data between SQLite and Supabase."""
+"""Data migration dialog for transferring data between SQLite and cloud backends."""
 
 from typing import TYPE_CHECKING, Optional
 
@@ -27,10 +27,10 @@ from fidra.services.migration import MigrationProgress, MigrationResult, Migrati
 
 
 class MigrationDialog(QDialog):
-    """Wizard dialog for migrating data between SQLite and Supabase.
+    """Wizard dialog for migrating data between SQLite and cloud backends.
 
     Steps:
-    1. Select migration direction (SQLite→Supabase or Supabase→SQLite)
+    1. Select migration direction (SQLite -> Cloud or Cloud -> SQLite)
     2. Configure options (include attachments, audit log)
     3. Execute migration with progress
     4. Show results
@@ -100,8 +100,10 @@ class MigrationDialog(QDialog):
         layout.addWidget(header)
 
         # Current status
-        if self._context.is_supabase:
-            status = QLabel("Current backend: Supabase (cloud)")
+        if self._context.is_cloud:
+            server = self._context.active_server
+            server_name = server.name if server else "Cloud"
+            status = QLabel(f"Current backend: {server_name} (cloud)")
             status.setStyleSheet("color: #10b981;")
         else:
             status = QLabel(f"Current backend: SQLite ({self._context.db_path.name})")
@@ -112,26 +114,38 @@ class MigrationDialog(QDialog):
         direction_group = QGroupBox("Migration Direction")
         direction_layout = QVBoxLayout(direction_group)
 
-        self._to_supabase_radio = QRadioButton("SQLite → Supabase (Upload to cloud)")
-        self._to_supabase_radio.setChecked(True)
-        direction_layout.addWidget(self._to_supabase_radio)
+        self._to_cloud_radio = QRadioButton("SQLite -> Cloud (Upload to cloud)")
+        direction_layout.addWidget(self._to_cloud_radio)
 
-        self._to_sqlite_radio = QRadioButton("Supabase → SQLite (Download to local)")
+        self._to_sqlite_radio = QRadioButton("Cloud -> SQLite (Download to local)")
         direction_layout.addWidget(self._to_sqlite_radio)
 
         # Disable options that don't apply
-        supabase_configured = bool(
-            self._context.settings.storage.supabase.db_connection_string
-        )
+        active_server = self._context.settings.storage.get_active_server()
+        cloud_configured = active_server is not None and active_server.db_connection_string
 
-        if not supabase_configured:
-            self._to_supabase_radio.setEnabled(False)
+        if not cloud_configured:
+            self._to_cloud_radio.setEnabled(False)
             self._to_sqlite_radio.setEnabled(False)
             warning = QLabel(
-                "Supabase is not configured. Please configure it first in Settings."
+                "No cloud server configured. Please add a server first in Settings > Cloud Servers."
             )
             warning.setStyleSheet("color: #ef4444;")
             direction_layout.addWidget(warning)
+        elif self._context.is_cloud:
+            # Currently on cloud - SQLite->Cloud doesn't make sense
+            self._to_cloud_radio.setEnabled(False)
+            self._to_sqlite_radio.setChecked(True)
+            warning = QLabel(
+                "You're currently connected to cloud. SQLite -> Cloud is only available\n"
+                "when connected to a local SQLite file."
+            )
+            warning.setStyleSheet("color: #f59e0b;")
+            warning.setWordWrap(True)
+            direction_layout.addWidget(warning)
+        else:
+            # Currently on SQLite - this is the normal case for SQLite->Cloud
+            self._to_cloud_radio.setChecked(True)
 
         layout.addWidget(direction_group)
 
@@ -189,10 +203,10 @@ class MigrationDialog(QDialog):
         warning_layout = QVBoxLayout(warning_group)
 
         warning_text = QLabel(
-            "• The migration will NOT delete data at the destination\n"
-            "• Duplicate records (same ID) will be skipped\n"
-            "• Attachment files will be copied (may take time for large files)\n"
-            "• A backup of your current data is recommended before migrating"
+            "- The migration will NOT delete data at the destination\n"
+            "- Duplicate records (same ID) will be skipped\n"
+            "- Attachment files will be copied (may take time for large files)\n"
+            "- A backup of your current data is recommended before migrating"
         )
         warning_text.setWordWrap(True)
         warning_layout.addWidget(warning_text)
@@ -294,16 +308,26 @@ class MigrationDialog(QDialog):
 
     def _validate_step1(self) -> bool:
         """Validate direction selection."""
-        supabase_configured = bool(
-            self._context.settings.storage.supabase.db_connection_string
-        )
+        active_server = self._context.settings.storage.get_active_server()
+        cloud_configured = active_server is not None and active_server.db_connection_string
 
-        if not supabase_configured:
+        if not cloud_configured:
             QMessageBox.warning(
                 self,
-                "Supabase Not Configured",
-                "Please configure Supabase settings first.\n\n"
-                "Go to Settings > Configure Supabase..."
+                "Cloud Server Not Configured",
+                "Please configure a cloud server first.\n\n"
+                "Go to Settings > Cloud Servers..."
+            )
+            return False
+
+        # Safety check: can't migrate SQLite->Cloud when already on cloud
+        if self._to_cloud_radio.isChecked() and self._context.is_cloud:
+            QMessageBox.warning(
+                self,
+                "Invalid Migration Direction",
+                "You are currently connected to a cloud server.\n\n"
+                "To upload data from SQLite to cloud, first connect to a local SQLite file,\n"
+                "then migrate to cloud."
             )
             return False
 
@@ -336,12 +360,12 @@ class MigrationDialog(QDialog):
         self._is_migrating = True
         self._update_buttons()
 
-        to_supabase = self._to_supabase_radio.isChecked()
+        to_cloud = self._to_cloud_radio.isChecked()
         self._progress_log.clear()
 
         try:
-            if to_supabase:
-                await self._migrate_to_supabase()
+            if to_cloud:
+                await self._migrate_to_cloud()
             else:
                 await self._migrate_to_sqlite()
         except Exception as e:
@@ -350,24 +374,24 @@ class MigrationDialog(QDialog):
         finally:
             self._is_migrating = False
 
-    async def _migrate_to_supabase(self) -> None:
-        """Migrate data from SQLite to Supabase."""
-        self._log("Starting migration to Supabase...")
+    async def _migrate_to_cloud(self) -> None:
+        """Migrate data from SQLite to cloud server."""
+        self._log("Starting migration to cloud...")
 
-        # Connect to Supabase
-        from fidra.data.supabase_connection import SupabaseConnection
+        # Connect to cloud server
+        from fidra.data.cloud_connection import CloudConnection
         from fidra.data.factory import create_repositories
 
-        supabase_config = self._context.settings.storage.supabase
-        supabase_conn = SupabaseConnection(supabase_config)
+        server_config = self._context.settings.storage.get_active_server()
+        cloud_conn = CloudConnection(server_config)
 
         try:
-            self._log("Connecting to Supabase...")
-            await supabase_conn.connect()
+            self._log(f"Connecting to {server_config.name}...")
+            await cloud_conn.connect()
 
             # Create destination repositories
             dest_repos = await create_repositories(
-                "supabase", supabase_connection=supabase_conn
+                "cloud", cloud_connection=cloud_conn
             )
             dest_trans_repo, dest_planned_repo, dest_sheet_repo, dest_audit_repo, dest_attach_repo = dest_repos
 
@@ -392,8 +416,8 @@ class MigrationDialog(QDialog):
             if not self._include_audit.isChecked():
                 data["audit_log"] = []
 
-            # Import to Supabase
-            self._log("Importing data to Supabase...")
+            # Import to cloud
+            self._log("Importing data to cloud...")
             result = await self._migration_service.import_from_json(
                 data,
                 dest_trans_repo,
@@ -406,7 +430,7 @@ class MigrationDialog(QDialog):
 
             # Migrate attachment files if included
             if self._include_attachments.isChecked() and data["attachments"]:
-                self._log("Uploading attachment files to Supabase Storage...")
+                self._log("Uploading attachment files to cloud storage...")
                 from fidra.domain.models import Attachment
 
                 attachments = [
@@ -415,43 +439,43 @@ class MigrationDialog(QDialog):
                 ]
 
                 local_dir = self._context.db_path.parent / f"{self._context.db_path.stem}_attachments"
-                uploaded, upload_errors = await self._migration_service.migrate_attachments_to_supabase(
+                uploaded, upload_errors = await self._migration_service.migrate_attachments_to_cloud(
                     local_dir,
                     attachments,
-                    supabase_config,
+                    server_config.storage,
                     progress_callback=self._on_progress,
                 )
                 result.errors.extend(upload_errors)
                 self._log(f"Uploaded {uploaded} attachment files")
 
-            self._show_result(result, to_supabase=True)
+            self._show_result(result, to_cloud=True)
 
         finally:
-            await supabase_conn.close()
+            await cloud_conn.close()
 
     async def _migrate_to_sqlite(self) -> None:
-        """Migrate data from Supabase to SQLite."""
+        """Migrate data from cloud to SQLite."""
         self._log("Starting migration to SQLite...")
 
-        # Connect to Supabase to read data
-        from fidra.data.supabase_connection import SupabaseConnection
+        # Connect to cloud to read data
+        from fidra.data.cloud_connection import CloudConnection
         from fidra.data.factory import create_repositories
 
-        supabase_config = self._context.settings.storage.supabase
-        supabase_conn = SupabaseConnection(supabase_config)
+        server_config = self._context.settings.storage.get_active_server()
+        cloud_conn = CloudConnection(server_config)
 
         try:
-            self._log("Connecting to Supabase...")
-            await supabase_conn.connect()
+            self._log(f"Connecting to {server_config.name}...")
+            await cloud_conn.connect()
 
-            # Create source repositories (Supabase)
+            # Create source repositories (cloud)
             src_repos = await create_repositories(
-                "supabase", supabase_connection=supabase_conn
+                "cloud", cloud_connection=cloud_conn
             )
             src_trans_repo, src_planned_repo, src_sheet_repo, src_audit_repo, src_attach_repo = src_repos
 
-            # Export from Supabase
-            self._log("Exporting data from Supabase...")
+            # Export from cloud
+            self._log("Exporting data from cloud...")
             data = await self._migration_service.export_to_json(
                 src_trans_repo,
                 src_planned_repo,
@@ -485,7 +509,7 @@ class MigrationDialog(QDialog):
 
             # Download attachment files if included
             if self._include_attachments.isChecked() and data["attachments"]:
-                self._log("Downloading attachment files from Supabase Storage...")
+                self._log("Downloading attachment files from cloud storage...")
                 from fidra.domain.models import Attachment
 
                 attachments = [
@@ -497,16 +521,16 @@ class MigrationDialog(QDialog):
                 downloaded, download_errors = await self._migration_service.migrate_attachments_to_local(
                     local_dir,
                     attachments,
-                    supabase_config,
+                    server_config.storage,
                     progress_callback=self._on_progress,
                 )
                 result.errors.extend(download_errors)
                 self._log(f"Downloaded {downloaded} attachment files")
 
-            self._show_result(result, to_supabase=False)
+            self._show_result(result, to_cloud=False)
 
         finally:
-            await supabase_conn.close()
+            await cloud_conn.close()
 
     def _on_progress(self, progress: MigrationProgress) -> None:
         """Handle progress update."""
@@ -521,12 +545,12 @@ class MigrationDialog(QDialog):
         """Add message to progress log."""
         self._progress_log.append(message)
 
-    def _show_result(self, result: MigrationResult, to_supabase: bool) -> None:
+    def _show_result(self, result: MigrationResult, to_cloud: bool) -> None:
         """Show migration result."""
         self._stack.setCurrentIndex(3)
         self._update_buttons()
 
-        direction = "to Supabase" if to_supabase else "to SQLite"
+        direction = "to cloud" if to_cloud else "to SQLite"
 
         summary = (
             f"Migration {direction} completed!\n\n"
@@ -546,7 +570,7 @@ class MigrationDialog(QDialog):
 
         # Store result for finish action
         self._migration_result = result
-        self._migrated_to_supabase = to_supabase
+        self._migrated_to_cloud = to_cloud
 
     def _show_error_result(self, error: str) -> None:
         """Show error result."""
@@ -562,14 +586,16 @@ class MigrationDialog(QDialog):
     @qasync.asyncSlot()
     async def _finish_migration(self) -> None:
         """Finish migration and optionally switch backend."""
-        if self._switch_backend_check.isChecked() and hasattr(self, '_migrated_to_supabase'):
+        if self._switch_backend_check.isChecked() and hasattr(self, '_migrated_to_cloud'):
             try:
-                if self._migrated_to_supabase:
-                    await self._context.switch_to_supabase()
+                if self._migrated_to_cloud:
+                    await self._context.switch_to_cloud()
+                    server = self._context.active_server
+                    server_name = server.name if server else "Cloud"
                     QMessageBox.information(
                         self,
                         "Backend Switched",
-                        "Now using Supabase backend.\n\n"
+                        f"Now using {server_name} backend.\n\n"
                         "Your data is stored in the cloud."
                     )
                 else:

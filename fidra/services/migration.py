@@ -1,4 +1,4 @@
-"""Data migration service for transferring data between SQLite and Supabase."""
+"""Data migration service for transferring data between SQLite and cloud backends."""
 
 import json
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ from fidra.domain.models import (
 )
 
 if TYPE_CHECKING:
-    from fidra.domain.settings import SupabaseSettings
+    from fidra.domain.settings import CloudStorageProvider
 
 
 @dataclass
@@ -54,12 +54,12 @@ ProgressCallback = Callable[[MigrationProgress], None]
 
 
 class MigrationService:
-    """Handles data migration between SQLite and Supabase backends.
+    """Handles data migration between SQLite and cloud backends.
 
     Supports:
     - Export from any backend to JSON format
     - Import from JSON to any backend
-    - Attachment file migration between local and Supabase Storage
+    - Attachment file migration between local and cloud storage
     """
 
     async def export_to_json(
@@ -292,29 +292,29 @@ class MigrationService:
             errors=errors,
         )
 
-    async def migrate_attachments_to_supabase(
+    async def migrate_attachments_to_cloud(
         self,
         local_dir: Path,
         attachments: list[Attachment],
-        supabase_config: "SupabaseSettings",
+        storage_config: "CloudStorageProvider",
         progress_callback: Optional[ProgressCallback] = None,
     ) -> tuple[int, list[str]]:
-        """Upload local attachment files to Supabase Storage.
+        """Upload local attachment files to cloud storage.
 
         Args:
             local_dir: Local directory containing attachment files
             attachments: List of attachment records to migrate
-            supabase_config: Supabase configuration
+            storage_config: Cloud storage provider configuration
             progress_callback: Optional callback for progress updates
 
         Returns:
             Tuple of (success_count, list of errors)
         """
-        storage_url = f"{supabase_config.project_url}/storage/v1"
-        bucket = supabase_config.storage_bucket
+        storage_url = f"{storage_config.project_url}/storage/v1"
+        bucket = storage_config.bucket
         headers = {
-            "Authorization": f"Bearer {supabase_config.anon_key}",
-            "apikey": supabase_config.anon_key,
+            "Authorization": f"Bearer {storage_config.anon_key}",
+            "apikey": storage_config.anon_key,
         }
 
         success_count = 0
@@ -358,25 +358,25 @@ class MigrationService:
         self,
         local_dir: Path,
         attachments: list[Attachment],
-        supabase_config: "SupabaseSettings",
+        storage_config: "CloudStorageProvider",
         progress_callback: Optional[ProgressCallback] = None,
     ) -> tuple[int, list[str]]:
-        """Download attachment files from Supabase Storage to local directory.
+        """Download attachment files from cloud storage to local directory.
 
         Args:
             local_dir: Local directory to save files to
             attachments: List of attachment records to download
-            supabase_config: Supabase configuration
+            storage_config: Cloud storage provider configuration
             progress_callback: Optional callback for progress updates
 
         Returns:
             Tuple of (success_count, list of errors)
         """
-        storage_url = f"{supabase_config.project_url}/storage/v1"
-        bucket = supabase_config.storage_bucket
+        storage_url = f"{storage_config.project_url}/storage/v1"
+        bucket = storage_config.bucket
         headers = {
-            "Authorization": f"Bearer {supabase_config.anon_key}",
-            "apikey": supabase_config.anon_key,
+            "Authorization": f"Bearer {storage_config.anon_key}",
+            "apikey": storage_config.anon_key,
         }
 
         # Ensure local directory exists

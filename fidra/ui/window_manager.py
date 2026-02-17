@@ -28,17 +28,19 @@ class WindowManager(QObject):
         self._windows: list = []  # List of (MainWindow, ApplicationContext) tuples
         self._settings_store = settings_store
         self._closing_all = False
+        self._pending_cleanup: list = []  # Contexts from closed windows needing cleanup
 
     @property
     def window_count(self) -> int:
         """Get number of open windows."""
         return len(self._windows)
 
-    def create_window(self, db_path: Optional[Path] = None, loop=None) -> bool:
-        """Create a new window with optional database path.
+    def create_window(self, db_path: Optional[Path] = None, server_id: Optional[str] = None, loop=None) -> bool:
+        """Create a new window with optional database path or cloud server.
 
         Args:
-            db_path: Path to database file. If None, shows setup wizard.
+            db_path: Path to database file. If None, shows file chooser.
+            server_id: Cloud server ID to connect to (takes precedence over db_path).
             loop: The asyncio event loop to use for initialization.
 
         Returns:
@@ -47,33 +49,59 @@ class WindowManager(QObject):
         # Import here to avoid circular imports
         from fidra.ui.main_window import MainWindow
 
-        # If no path, show file chooser
-        if db_path is None:
-            # Get last file from settings to offer as option
+        # If no path and no server, show file chooser
+        if db_path is None and server_id is None:
+            # Get settings to offer options
             settings = self._settings_store.load()
             last_file = settings.storage.last_file
+            cloud_servers = settings.storage.cloud_servers
+            active_server_id = settings.storage.active_server_id
 
-            chooser = FileChooserDialog(last_file=last_file)
+            chooser = FileChooserDialog(
+                last_file=last_file,
+                cloud_servers=cloud_servers,
+                active_server_id=active_server_id,
+            )
             if chooser.exec():
-                db_path = chooser.db_path
+                if chooser.is_cloud:
+                    server_id = chooser.selected_server_id
+                else:
+                    db_path = chooser.db_path
             else:
                 return False
 
-        # Create context for this window
-        ctx = ApplicationContext(db_path=db_path)
+        # Create context
+        ctx = ApplicationContext(db_path=db_path or Path("fidra.db"))
 
-        # Initialize async components
-        if loop:
-            try:
-                loop.run_until_complete(self._init_context(ctx))
-            except DatabaseValidationError as e:
-                self._show_validation_error(db_path, e)
-                return False
+        # Initialize based on whether this is cloud or local
+        if server_id:
+            # Cloud server connection
+            ctx.settings.storage.active_server_id = server_id
+            ctx.settings.storage.backend = "cloud"
 
-        # Update last opened timestamp (only after successful init)
-        ctx.settings.storage.last_file = db_path
-        ctx.settings.storage.last_opened_at = datetime.now().isoformat()
-        ctx.save_settings()
+            if loop:
+                try:
+                    loop.run_until_complete(self._init_cloud_context(ctx, server_id))
+                except Exception as e:
+                    self._show_cloud_error(server_id, e)
+                    return False
+
+            # Save settings with active server
+            ctx.save_settings()
+        else:
+            # Local SQLite file
+            if loop:
+                try:
+                    loop.run_until_complete(self._init_context(ctx))
+                except DatabaseValidationError as e:
+                    self._show_validation_error(db_path, e)
+                    return False
+
+            # Update last opened timestamp (only after successful init)
+            ctx.settings.storage.last_file = db_path
+            ctx.settings.storage.last_opened_at = datetime.now().isoformat()
+            ctx.settings.storage.backend = "sqlite"
+            ctx.save_settings()
 
         # Create and show window
         window = MainWindow(ctx, window_manager=self)
@@ -84,31 +112,67 @@ class WindowManager(QObject):
 
         return True
 
-    async def create_window_async(self, db_path: Path) -> bool:
+    async def _init_cloud_context(self, ctx: ApplicationContext, server_id: str) -> None:
+        """Initialize application context for cloud backend."""
+        await ctx.switch_to_cloud(server_id)
+        server = ctx.active_server
+        print(f"Connected to: {server.name if server else 'Cloud'}")
+        print(f"Loaded {len(ctx.state.transactions.value)} transactions")
+
+    def _show_cloud_error(self, server_id: str, error: Exception) -> None:
+        """Show an error dialog for cloud connection failures."""
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("Connection Failed")
+        msg.setText("Unable to connect to cloud server")
+        msg.setInformativeText(str(error))
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+
+    async def create_window_async(
+        self, db_path: Optional[Path] = None, server_id: Optional[str] = None
+    ) -> bool:
         """Create a new window asynchronously (for use when event loop is running).
 
         Args:
             db_path: Path to database file.
+            server_id: Cloud server ID to connect to (takes precedence over db_path).
 
         Returns:
             True if window was created, False on error.
         """
         from fidra.ui.main_window import MainWindow
 
-        # Create context for this window
-        ctx = ApplicationContext(db_path=db_path)
+        if server_id:
+            # Cloud server connection
+            ctx = ApplicationContext(db_path=Path("fidra.db"))
+            ctx.settings.storage.active_server_id = server_id
+            ctx.settings.storage.backend = "cloud"
 
-        # Initialize async components
-        try:
-            await self._init_context(ctx)
-        except DatabaseValidationError as e:
-            self._show_validation_error(db_path, e)
-            return False
+            try:
+                await self._init_cloud_context(ctx, server_id)
+            except Exception as e:
+                self._show_cloud_error(server_id, e)
+                return False
 
-        # Update last opened timestamp
-        ctx.settings.storage.last_file = db_path
-        ctx.settings.storage.last_opened_at = datetime.now().isoformat()
-        ctx.save_settings()
+            # Update last opened timestamp and save settings
+            ctx.settings.storage.last_opened_at = datetime.now().isoformat()
+            ctx.save_settings()
+        else:
+            # Local SQLite file
+            ctx = ApplicationContext(db_path=db_path)
+
+            try:
+                await self._init_context(ctx)
+            except DatabaseValidationError as e:
+                self._show_validation_error(db_path, e)
+                return False
+
+            # Update last opened timestamp
+            ctx.settings.storage.last_file = db_path
+            ctx.settings.storage.last_opened_at = datetime.now().isoformat()
+            ctx.settings.storage.backend = "sqlite"
+            ctx.save_settings()
 
         # Create and show window
         window = MainWindow(ctx, window_manager=self)
@@ -146,12 +210,18 @@ class WindowManager(QObject):
         Args:
             window: The MainWindow to close.
         """
+        ctx_to_close = None
         for i, (w, ctx) in enumerate(self._windows):
             if w is window:
+                ctx_to_close = ctx
                 self._windows.pop(i)
                 break
 
-        # If no windows left, emit signal
+        # Track context for cleanup in close_all_windows
+        if ctx_to_close:
+            self._pending_cleanup.append(ctx_to_close)
+
+        # If no windows left, emit signal (triggers app quit)
         if not self._windows and not self._closing_all:
             self.all_windows_closed.emit()
 
@@ -159,11 +229,17 @@ class WindowManager(QObject):
         """Close all windows and clean up resources."""
         self._closing_all = True
 
+        # Close any remaining windows
         for window, ctx in self._windows:
             await ctx.close()
             window.close()
 
+        # Clean up contexts from windows that were already closed
+        for ctx in self._pending_cleanup:
+            await ctx.close()
+
         self._windows.clear()
+        self._pending_cleanup.clear()
         self._closing_all = False
 
     def get_open_files(self) -> list[Path]:

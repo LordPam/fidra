@@ -65,7 +65,13 @@ class ReportBuilder:
             filtered = [t for t in filtered if t.date <= end_date]
 
         # Sort by date
-        filtered = sorted(filtered, key=lambda t: (t.date, t.created_at))
+        # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+        def sort_key(t):
+            created = t.created_at
+            if created and created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
+            return (t.date, created)
+        filtered = sorted(filtered, key=sort_key)
 
         if format == "pdf":
             # PDF uses ReportLab directly for professional branded output

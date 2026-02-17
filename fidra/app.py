@@ -4,6 +4,7 @@ The ApplicationContext wires together all application components
 and provides them to the UI layer.
 """
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
@@ -12,6 +13,7 @@ from fidra.data.factory import create_repositories
 from fidra.data.repository import (
     AttachmentRepository,
     AuditRepository,
+    CategoryRepository,
     PlannedRepository,
     SheetRepository,
     TransactionRepository,
@@ -29,6 +31,13 @@ from fidra.services.financial_year import FinancialYearService
 from fidra.services.forecast import ForecastService
 from fidra.services.search import SearchService
 from fidra.services.undo import UndoStack
+
+# Conditional import for type hints
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from fidra.services.connection_state import ConnectionStateService
+    from fidra.services.sync_service import SyncService
+    from fidra.data.sync_queue import SyncQueue
 
 
 class ApplicationContext:
@@ -52,7 +61,7 @@ class ApplicationContext:
         Args:
             db_path: Optional path to database file.
                      Defaults to "fidra.db" in current directory.
-                     Ignored when using Supabase backend.
+                     Ignored when using cloud backend.
         """
         self._db_path = db_path or Path("fidra.db")
 
@@ -63,8 +72,12 @@ class ApplicationContext:
         # State
         self.state = AppState()
 
-        # Supabase connection (initialized in initialize() if using supabase backend)
-        self._supabase_connection = None
+        # Cloud connection (initialized in initialize() if using cloud backend)
+        self._cloud_connection = None
+        self.connection_state: Optional["ConnectionStateService"] = None
+        self.sync_queue: Optional["SyncQueue"] = None
+        self.sync_service: Optional["SyncService"] = None
+        self.change_listener = None  # ChangeListener for real-time LISTEN/NOTIFY
 
         # Repositories (initialized in initialize())
         self.transaction_repo: Optional[TransactionRepository] = None
@@ -72,9 +85,10 @@ class ApplicationContext:
         self.sheet_repo: Optional[SheetRepository] = None
         self.audit_repo: Optional[AuditRepository] = None
         self.attachment_repo: Optional[AttachmentRepository] = None
+        self.category_repo: Optional[CategoryRepository] = None
 
         # Services
-        self.attachment_service: Optional[Union[AttachmentService, "SupabaseAttachmentService"]] = None
+        self.attachment_service: Optional[Union[AttachmentService, "CloudAttachmentService"]] = None
         self.audit_service: Optional[AuditService] = None
         self.backup_service = BackupService(self._db_path, self.settings.backup)
         self.balance_service = BalanceService()
@@ -99,34 +113,66 @@ class ApplicationContext:
         # Create repositories based on settings
         backend = self.settings.storage.backend
 
-        if backend == "supabase":
-            # Initialize Supabase connection and repositories
-            from fidra.data.supabase_connection import SupabaseConnection
-            from fidra.services.supabase_attachments import SupabaseAttachmentService
+        if backend == "cloud":
+            # Initialize cloud connection and repositories
+            from fidra.data.cloud_connection import CloudConnection
+            from fidra.services.cloud_attachments import create_cloud_attachment_service
 
-            supabase_config = self.settings.storage.supabase
-            self._supabase_connection = SupabaseConnection(supabase_config)
-            await self._supabase_connection.connect()
+            server_config = self.settings.storage.get_active_server()
+            if not server_config:
+                raise ValueError("No cloud server configured")
+
+            self._cloud_connection = CloudConnection(server_config)
+            await self._cloud_connection.connect()
+
+            # Create connection state service for monitoring
+            from fidra.services.connection_state import ConnectionStateService
+            self.connection_state = ConnectionStateService(self._cloud_connection)
+            self.connection_state.start_monitoring()
+
+            # Wire up connection state to app state
+            self.connection_state.status_changed.connect(
+                lambda status: self.state.connection_status.set(status.value)
+            )
 
             (
                 self.transaction_repo, self.planned_repo, self.sheet_repo,
-                self.audit_repo, self.attachment_repo,
+                self.audit_repo, self.attachment_repo, self.category_repo,
+                self.sync_queue,
             ) = await create_repositories(
-                backend, supabase_connection=self._supabase_connection
+                backend,
+                cloud_connection=self._cloud_connection,
+                connection_state=self.connection_state,
             )
 
-            # Create Supabase attachment service
+            # Initialize sync service if we have a sync queue
+            if self.sync_queue:
+                await self._init_sync_service()
+
+            # Start real-time change listener for updates from other devices
+            await self._init_change_listener()
+
+            # Migrate categories from settings to database if empty
+            await self._migrate_categories_to_db()
+
+            # Create cloud attachment service
             user = self.settings.profile.initials or self.settings.profile.name or "System"
-            self.audit_service = AuditService(self.audit_repo, user=user)
-            self.attachment_service = SupabaseAttachmentService(
-                self.attachment_repo, supabase_config
+            self.audit_service = AuditService(
+                self.audit_repo, user=user, connection_state=self.connection_state
+            )
+            self.attachment_service = create_cloud_attachment_service(
+                self.attachment_repo, server_config.storage
             )
         else:
             # SQLite backend (default)
             (
                 self.transaction_repo, self.planned_repo, self.sheet_repo,
-                self.audit_repo, self.attachment_repo,
+                self.audit_repo, self.attachment_repo, self.category_repo,
+                _,  # No sync queue for SQLite
             ) = await create_repositories(backend, self._db_path)
+
+            # Migrate categories from settings to database if empty
+            await self._migrate_categories_to_db()
 
             # Create local attachment service
             user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -141,6 +187,147 @@ class ApplicationContext:
 
         # Restore UI state from settings
         self._restore_ui_state()
+
+    async def _init_sync_service(self) -> None:
+        """Initialize the background sync service for cloud mode."""
+        from fidra.services.sync_service import SyncService, ConflictStrategy
+        from fidra.services.connection_state import ConnectionStatus
+
+        # Get sync settings
+        sync_settings = self.settings.sync
+        strategy = ConflictStrategy(sync_settings.conflict_strategy)
+
+        self.sync_service = SyncService(
+            sync_queue=self.sync_queue,
+            transaction_repo=self.transaction_repo,
+            planned_repo=self.planned_repo,
+            sheet_repo=self.sheet_repo,
+            category_repo=self.category_repo,
+            connection_state=self.connection_state,
+            conflict_strategy=strategy,
+            sync_interval_ms=sync_settings.sync_interval_seconds * 1000,
+        )
+
+        # Wire up signals to app state
+        self.sync_service.pending_count_changed.connect(
+            lambda count: self.state.pending_sync_count.set(count)
+        )
+        self.sync_service.sync_completed.connect(
+            lambda _: self.state.last_sync_time.set(datetime.now())
+        )
+
+        # Trigger immediate sync and restart listener when connection is restored
+        def on_status_changed(status: ConnectionStatus):
+            if status == ConnectionStatus.CONNECTED:
+                # Use QTimer to defer to avoid re-entrancy issues
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(100, lambda: asyncio.ensure_future(self.sync_service.sync_now()))
+                if self.change_listener:
+                    QTimer.singleShot(500, lambda: asyncio.ensure_future(self.change_listener.restart()))
+
+        self.connection_state.status_changed.connect(on_status_changed)
+
+        # Start the sync service
+        self.sync_service.start()
+
+        # If there are pending changes from a previous session, sync immediately
+        pending_count = await self.sync_queue.get_pending_count()
+        if pending_count > 0:
+            print(f"[SYNC] Found {pending_count} pending changes from previous session")
+            try:
+                await self.sync_service.sync_now()
+                # After syncing, refresh caches from cloud to get any other updates
+                await self._refresh_caches_from_cloud()
+            except Exception as e:
+                print(f"[SYNC] Initial sync failed: {e} - will retry in background")
+
+    async def _init_change_listener(self) -> None:
+        """Initialize the real-time change listener for cloud mode."""
+        from fidra.services.change_listener import ChangeListener
+
+        self.change_listener = ChangeListener(
+            cloud_connection=self._cloud_connection,
+            debounce_ms=1000,
+        )
+        # Use ensure_future since ApplicationContext is not a QObject
+        self.change_listener.tables_changed.connect(
+            lambda tables: asyncio.ensure_future(self._on_remote_tables_changed(tables))
+        )
+        await self.change_listener.start()
+
+    async def _on_remote_tables_changed(self, changed_tables: set) -> None:
+        """Handle remote data changes detected via LISTEN/NOTIFY."""
+        for attempt in range(2):
+            try:
+                if "transactions" in changed_tables and hasattr(self.transaction_repo, 'refresh_from_cloud'):
+                    await self.transaction_repo.refresh_from_cloud()
+                if "planned_templates" in changed_tables and hasattr(self.planned_repo, 'refresh_from_cloud'):
+                    await self.planned_repo.refresh_from_cloud()
+                if "sheets" in changed_tables and hasattr(self.sheet_repo, 'refresh_from_cloud'):
+                    await self.sheet_repo.refresh_from_cloud()
+                if "categories" in changed_tables and hasattr(self.category_repo, 'refresh_from_cloud'):
+                    await self.category_repo.refresh_from_cloud()
+
+                # Reload state from refreshed caches
+                await self._load_initial_data()
+                print(f"[LISTEN] Refreshed state for: {changed_tables}")
+                return
+            except Exception as e:
+                print(f"[LISTEN] Refresh attempt {attempt + 1} failed: {e}")
+                if "readonly" in str(e).lower() and attempt == 0:
+                    await self._reconnect_local_cache()
+                elif attempt == 0:
+                    await asyncio.sleep(1)
+
+    async def _reconnect_local_cache(self) -> None:
+        """Reconnect the local SQLite cache after a readonly error.
+
+        SQLite can mark a connection as readonly if the underlying file
+        was replaced (SQLITE_READONLY_DBMOVED). Reopening the connection
+        fixes this.
+        """
+        if not hasattr(self.transaction_repo, '_local'):
+            return
+
+        local_trans = self.transaction_repo._local
+        old_conn = local_trans._conn
+
+        # Close the stale connection
+        if old_conn:
+            try:
+                await old_conn.close()
+            except Exception:
+                pass
+
+        # Reopen
+        await local_trans.connect()
+        new_conn = local_trans._conn
+
+        # Update all repos that share this connection
+        if hasattr(self.planned_repo, '_local'):
+            self.planned_repo._local._conn = new_conn
+        if hasattr(self.sheet_repo, '_local'):
+            self.sheet_repo._local._conn = new_conn
+        if hasattr(self.category_repo, '_local'):
+            self.category_repo._local._conn = new_conn
+
+        print("[CACHE] Local cache connection reconnected")
+
+    async def _refresh_caches_from_cloud(self) -> None:
+        """Refresh all caches from cloud data.
+
+        Called after syncing pending changes to get latest server state.
+        """
+        if hasattr(self.transaction_repo, 'refresh_from_cloud'):
+            print("[CACHE] Refreshing caches from cloud...")
+            try:
+                await self.transaction_repo.refresh_from_cloud()
+                await self.planned_repo.refresh_from_cloud()
+                await self.sheet_repo.refresh_from_cloud()
+                await self.category_repo.refresh_from_cloud()
+                print("[CACHE] Cache refresh complete")
+            except Exception as e:
+                print(f"[CACHE] Cache refresh failed: {e}")
 
     async def _load_initial_data(self) -> None:
         """Load initial data into state."""
@@ -203,10 +390,43 @@ class ApplicationContext:
         self.file_watcher.stop_watching()
 
         # Close connections based on backend
-        if backend == "supabase":
-            if self._supabase_connection:
-                await self._supabase_connection.close()
-                self._supabase_connection = None
+        if backend == "cloud":
+            # Stop change listener
+            if self.change_listener:
+                try:
+                    await asyncio.wait_for(self.change_listener.stop(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    print("Warning: Change listener stop timed out")
+                self.change_listener = None
+
+            # Stop sync service (with timeout to prevent hanging)
+            if self.sync_service:
+                try:
+                    await asyncio.wait_for(self.sync_service.stop_async(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    print("Warning: Sync service stop timed out")
+                self.sync_service = None
+
+            # Close sync queue
+            if self.sync_queue:
+                try:
+                    await asyncio.wait_for(self.sync_queue.close(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    print("Warning: Sync queue close timed out")
+                self.sync_queue = None
+
+            # Stop connection monitoring
+            if self.connection_state:
+                try:
+                    await asyncio.wait_for(self.connection_state.stop_monitoring_async(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    print("Warning: Connection state stop timed out")
+                self.connection_state = None
+
+            # Close cloud connection (uses timeout with terminate() fallback)
+            if self._cloud_connection:
+                await self._cloud_connection.close(timeout=2.0)
+                self._cloud_connection = None
         else:
             if self.transaction_repo:
                 await self.transaction_repo.close()
@@ -227,8 +447,12 @@ class ApplicationContext:
         # Reinitialize repositories
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
-            self.audit_repo, self.attachment_repo,
+            self.audit_repo, self.attachment_repo, self.category_repo,
+            _,  # No sync queue for SQLite
         ) = await create_repositories("sqlite", self._db_path)
+
+        # Migrate categories from settings to database if empty
+        await self._migrate_categories_to_db()
 
         # Recreate services with new repos
         user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -249,41 +473,76 @@ class ApplicationContext:
         self.settings.storage.last_opened_at = datetime.now().isoformat()
         self.save_settings()
 
-    async def switch_to_supabase(self) -> None:
-        """Switch to Supabase backend using configured settings.
+    async def switch_to_cloud(self, server_id: str | None = None) -> None:
+        """Switch to cloud backend using configured settings.
 
-        Requires Supabase settings to be configured first.
+        Args:
+            server_id: ID of the server to connect to. If None, uses active_server_id.
+
+        Requires cloud server settings to be configured first.
         """
-        from fidra.data.supabase_connection import SupabaseConnection
-        from fidra.services.supabase_attachments import SupabaseAttachmentService
+        from fidra.data.cloud_connection import CloudConnection
+        from fidra.services.cloud_attachments import create_cloud_attachment_service
 
-        supabase_config = self.settings.storage.supabase
-        if not supabase_config.db_connection_string:
-            raise ValueError("Supabase connection string not configured")
+        # Get the server config
+        if server_id:
+            self.settings.storage.active_server_id = server_id
+
+        server_config = self.settings.storage.get_active_server()
+        if not server_config:
+            raise ValueError("No cloud server configured")
+
+        if not server_config.db_connection_string:
+            raise ValueError("Database connection string not configured")
 
         # Close existing connections
         await self.close()
 
         # Update backend
-        self.settings.storage.backend = "supabase"
+        self.settings.storage.backend = "cloud"
 
-        # Initialize Supabase connection
-        self._supabase_connection = SupabaseConnection(supabase_config)
-        await self._supabase_connection.connect()
+        # Initialize cloud connection
+        self._cloud_connection = CloudConnection(server_config)
+        await self._cloud_connection.connect()
 
-        # Create repositories
+        # Create connection state service for monitoring
+        from fidra.services.connection_state import ConnectionStateService
+        self.connection_state = ConnectionStateService(self._cloud_connection)
+        self.connection_state.start_monitoring()
+
+        # Wire up connection state to app state
+        self.connection_state.status_changed.connect(
+            lambda status: self.state.connection_status.set(status.value)
+        )
+
+        # Create repositories with caching
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
-            self.audit_repo, self.attachment_repo,
+            self.audit_repo, self.attachment_repo, self.category_repo,
+            self.sync_queue,
         ) = await create_repositories(
-            "supabase", supabase_connection=self._supabase_connection
+            "cloud",
+            cloud_connection=self._cloud_connection,
+            connection_state=self.connection_state,
         )
+
+        # Initialize sync service if we have a sync queue
+        if self.sync_queue:
+            await self._init_sync_service()
+
+        # Start real-time change listener for updates from other devices
+        await self._init_change_listener()
+
+        # Migrate categories from settings to database if empty
+        await self._migrate_categories_to_db()
 
         # Recreate services
         user = self.settings.profile.initials or self.settings.profile.name or "System"
-        self.audit_service = AuditService(self.audit_repo, user=user)
-        self.attachment_service = SupabaseAttachmentService(
-            self.attachment_repo, supabase_config
+        self.audit_service = AuditService(
+            self.audit_repo, user=user, connection_state=self.connection_state
+        )
+        self.attachment_service = create_cloud_attachment_service(
+            self.attachment_repo, server_config.storage
         )
 
         # Reload all data
@@ -293,9 +552,14 @@ class ApplicationContext:
         self.save_settings()
 
     @property
-    def is_supabase(self) -> bool:
-        """Check if currently using Supabase backend."""
-        return self.settings.storage.backend == "supabase"
+    def is_cloud(self) -> bool:
+        """Check if currently using cloud backend."""
+        return self.settings.storage.backend == "cloud"
+
+    @property
+    def active_server(self):
+        """Get the active cloud server configuration."""
+        return self.settings.storage.get_active_server()
 
     @property
     def db_path(self) -> Path:
@@ -319,3 +583,56 @@ class ApplicationContext:
         self.settings.ui_state.filtered_balance_mode = self.state.filtered_balance_mode.value
         self.settings.ui_state.current_sheet = self.state.current_sheet.value
         self.save_settings()
+
+    async def _migrate_categories_to_db(self) -> None:
+        """Migrate categories from settings to database if database is empty.
+
+        This handles the one-time migration when upgrading from settings-based
+        categories to database-stored categories.
+        """
+        if not self.category_repo:
+            return
+
+        # Check if database already has categories
+        income_cats = await self.category_repo.get_all("income")
+        expense_cats = await self.category_repo.get_all("expense")
+
+        if income_cats or expense_cats:
+            # Database already has categories, don't overwrite
+            return
+
+        # Migrate from settings
+        settings_income = self.settings.income_categories
+        settings_expense = self.settings.expense_categories
+
+        if settings_income:
+            await self.category_repo.set_all("income", settings_income)
+
+        if settings_expense:
+            await self.category_repo.set_all("expense", settings_expense)
+
+    async def get_categories(self, type: str) -> list[str]:
+        """Get categories for a transaction type.
+
+        Args:
+            type: 'income' or 'expense'
+
+        Returns:
+            List of category names
+        """
+        if self.category_repo:
+            return await self.category_repo.get_all(type)
+        # Fallback to settings (shouldn't happen after migration)
+        if type == "income":
+            return self.settings.income_categories
+        return self.settings.expense_categories
+
+    async def set_categories(self, type: str, categories: list[str]) -> None:
+        """Set categories for a transaction type.
+
+        Args:
+            type: 'income' or 'expense'
+            categories: List of category names
+        """
+        if self.category_repo:
+            await self.category_repo.set_all(type, categories)

@@ -71,7 +71,13 @@ class BalanceService:
         running = Decimal("0")
 
         # Sort by date (ascending), then by created_at
-        sorted_trans = sorted(transactions, key=lambda x: (x.date, x.created_at))
+        # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+        def sort_key(t):
+            created = t.created_at
+            if created and created.tzinfo is not None:
+                created = created.replace(tzinfo=None)
+            return (t.date, created)
+        sorted_trans = sorted(transactions, key=sort_key)
 
         for t in sorted_trans:
             if t.type == TransactionType.INCOME and t.status in self.COUNTABLE_INCOME:

@@ -42,7 +42,7 @@ from fidra.ui.dialogs.manage_categories_dialog import ManageCategoriesDialog
 from fidra.ui.dialogs.migration_dialog import MigrationDialog
 from fidra.ui.dialogs.opening_balance_dialog import OpeningBalanceDialog
 from fidra.ui.dialogs.profile_dialog import ProfileDialog
-from fidra.ui.dialogs.supabase_config_dialog import SupabaseConfigDialog
+from fidra.ui.dialogs.cloud_servers_list_dialog import CloudServersListDialog
 from fidra.ui.dialogs.transaction_settings_dialog import TransactionSettingsDialog
 from fidra.ui.components.notification_banner import NotificationBanner
 
@@ -137,6 +137,22 @@ class MainWindow(QMainWindow):
         self.status_bar.setObjectName("status_bar")
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
+
+        # Connection indicator (cloud mode only)
+        self.connection_indicator = None
+        if self._ctx.is_cloud and self._ctx.connection_state:
+            from fidra.ui.components.connection_indicator import ConnectionIndicator
+            self.connection_indicator = ConnectionIndicator(
+                self._ctx.connection_state,
+                parent=self.status_bar
+            )
+            self.status_bar.addPermanentWidget(self.connection_indicator)
+
+            # Wire up sync service signals to connection indicator
+            if self._ctx.sync_service:
+                self._ctx.sync_service.pending_count_changed.connect(
+                    self.connection_indicator.set_pending_count
+                )
 
     def _create_top_bar(self) -> QWidget:
         """Create top bar with logo and navigation tabs.
@@ -348,8 +364,9 @@ class MainWindow(QMainWindow):
             sheet = self._state.current_sheet.value
 
         # Get the database/project name
-        if self._ctx.is_supabase:
-            db_name = self._ctx.settings.storage.supabase.get_display_name()
+        if self._ctx.is_cloud:
+            server = self._ctx.active_server
+            db_name = server.name if server else "Cloud"
         elif self._ctx.settings.storage.last_file:
             db_name = self._ctx.settings.storage.last_file.stem
         else:
@@ -401,9 +418,14 @@ class MainWindow(QMainWindow):
         """Show settings menu with database options."""
         menu = QMenu(self)
 
-        # Current database info
-        current_db = self._ctx.db_path
-        db_info = menu.addAction(f"Current: {current_db.name}")
+        # Current database/server info
+        if self._ctx.is_cloud:
+            server = self._ctx.active_server
+            current_name = server.name if server else "Cloud Server"
+            db_info = menu.addAction(f"Current: {current_name} (cloud)")
+        else:
+            current_db = self._ctx.db_path
+            db_info = menu.addAction(f"Current: {current_db.name}")
         db_info.setEnabled(False)
 
         menu.addSeparator()
@@ -429,19 +451,12 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
 
-        # Supabase options
-        supabase_action = menu.addAction("Configure Supabase...")
-        supabase_action.triggered.connect(self._show_supabase_config)
+        # Cloud server options
+        cloud_action = menu.addAction("Cloud Servers...")
+        cloud_action.triggered.connect(self._show_cloud_servers)
 
         migrate_action = menu.addAction("Migrate Data...")
         migrate_action.triggered.connect(self._show_migration)
-
-        # Show current backend status
-        if self._ctx.is_supabase:
-            backend_info = menu.addAction("Backend: Supabase (cloud)")
-        else:
-            backend_info = menu.addAction("Backend: SQLite (local)")
-        backend_info.setEnabled(False)
 
         menu.addSeparator()
 
@@ -487,10 +502,26 @@ class MainWindow(QMainWindow):
             # Reload data after potential restore
             self._reload_transactions()
 
-    def _show_supabase_config(self) -> None:
-        """Show the Supabase configuration dialog."""
-        dialog = SupabaseConfigDialog(self._ctx, self)
+    def _show_cloud_servers(self) -> None:
+        """Show the cloud servers management dialog."""
+        dialog = CloudServersListDialog(self._ctx, parent=self)
+        dialog.connect_requested.connect(self._on_connect_to_server)
         dialog.exec()
+
+    @qasync.asyncSlot(str)
+    async def _on_connect_to_server(self, server_id: str) -> None:
+        """Connect to a cloud server."""
+        try:
+            await self._ctx.switch_to_cloud(server_id)
+            self._update_window_title()
+            self._reload_transactions()
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Connection Failed",
+                f"Could not connect to cloud server:\n\n{e}"
+            )
 
     def _show_migration(self) -> None:
         """Show the data migration dialog."""
@@ -804,27 +835,44 @@ class MainWindow(QMainWindow):
                     self.status_bar.showMessage(f"Error saving opening balance: {e}", 5000)
 
     def _new_window(self) -> None:
-        """Open a new window by selecting a file."""
+        """Open a new window by selecting a file or cloud server."""
         if not self._window_manager:
             return
 
-        # Show file dialog directly
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open Database in New Window",
-            str(Path.home()),
-            "All Databases (*.fdra *.db);;Fidra Files (*.fdra);;Legacy Database (*.db);;All Files (*)"
+        from fidra.ui.dialogs.file_chooser import FileChooserDialog
+
+        # Get cloud servers from settings
+        settings = self._ctx.settings
+        cloud_servers = settings.storage.cloud_servers
+        active_server_id = settings.storage.active_server_id
+
+        # Get last file (if exists)
+        last_file = settings.storage.last_file
+        if last_file and not last_file.exists():
+            last_file = None
+
+        # Show file chooser dialog with cloud support
+        chooser = FileChooserDialog(
+            last_file=last_file,
+            cloud_servers=cloud_servers,
+            active_server_id=active_server_id,
+            parent=self,
         )
 
-        if file_path:
-            path = Path(file_path)
-            if path.exists():
-                # Check if already open
-                if self._window_manager.is_file_open(path):
-                    self._window_manager.focus_window_for_file(path)
-                else:
-                    # Create window asynchronously
-                    asyncio.create_task(self._window_manager.create_window_async(path))
+        if chooser.exec():
+            if chooser.is_cloud:
+                # Connect to cloud server in new window
+                server_id = chooser.selected_server_id
+                asyncio.create_task(self._window_manager.create_window_async(server_id=server_id))
+            else:
+                # Open local file
+                path = chooser.db_path
+                if path and path.exists():
+                    # Check if already open
+                    if self._window_manager.is_file_open(path):
+                        self._window_manager.focus_window_for_file(path)
+                    else:
+                        asyncio.create_task(self._window_manager.create_window_async(path))
 
     def closeEvent(self, event) -> None:
         """Handle window close event.

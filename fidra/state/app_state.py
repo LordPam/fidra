@@ -5,6 +5,7 @@ This enables reactive UI updates and centralized state management.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -49,6 +50,17 @@ class AppState:
     # Loading/error state
     is_loading: Observable[bool] = field(default_factory=lambda: Observable(False))
     error_message: Observable[Optional[str]] = field(
+        default_factory=lambda: Observable(None)
+    )
+
+    # Sync state (for cloud mode)
+    connection_status: Observable[str] = field(
+        default_factory=lambda: Observable("connected")
+    )
+    pending_sync_count: Observable[int] = field(
+        default_factory=lambda: Observable(0)
+    )
+    last_sync_time: Observable[Optional[datetime]] = field(
         default_factory=lambda: Observable(None)
     )
 

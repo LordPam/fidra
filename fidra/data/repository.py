@@ -299,6 +299,55 @@ class AuditRepository(ABC):
         ...
 
 
+class CategoryRepository(ABC):
+    """Abstract interface for category storage."""
+
+    @abstractmethod
+    async def get_all(self, type: str) -> list[str]:
+        """Get all categories for a transaction type.
+
+        Args:
+            type: 'income' or 'expense'
+
+        Returns:
+            List of category names
+        """
+        ...
+
+    @abstractmethod
+    async def add(self, type: str, name: str) -> None:
+        """Add a category.
+
+        Args:
+            type: 'income' or 'expense'
+            name: Category name
+        """
+        ...
+
+    @abstractmethod
+    async def remove(self, type: str, name: str) -> bool:
+        """Remove a category.
+
+        Args:
+            type: 'income' or 'expense'
+            name: Category name
+
+        Returns:
+            True if removed, False if not found
+        """
+        ...
+
+    @abstractmethod
+    async def set_all(self, type: str, names: list[str]) -> None:
+        """Replace all categories for a type.
+
+        Args:
+            type: 'income' or 'expense'
+            names: List of category names
+        """
+        ...
+
+
 class ConcurrencyError(Exception):
     """Raised when a version conflict is detected during save."""
 

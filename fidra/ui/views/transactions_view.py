@@ -397,7 +397,13 @@ class TransactionsView(QWidget):
             planned_instances = self._get_planned_instances_for_current_sheet()
 
             base_transactions = actuals + planned_instances
-            base_transactions.sort(key=lambda t: (t.date, t.created_at))
+            # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+            def sort_key(t):
+                created = t.created_at
+                if created and created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                return (t.date, created)
+            base_transactions.sort(key=sort_key)
         else:
             base_transactions = actuals
 
@@ -468,7 +474,13 @@ class TransactionsView(QWidget):
 
             # Mix actuals and planned, sort chronologically
             base_transactions = actuals + planned_instances
-            base_transactions.sort(key=lambda t: (t.date, t.created_at))
+            # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+            def sort_key(t):
+                created = t.created_at
+                if created and created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                return (t.date, created)
+            base_transactions.sort(key=sort_key)
 
         # Apply search filter if query is present
         if self._current_search_query and self._current_search_query.strip():
@@ -620,7 +632,8 @@ class TransactionsView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to add transaction: {e}")
 
-    def _on_edit_requested(self, transaction: Transaction) -> None:
+    @qasync.asyncSlot(object)
+    async def _on_edit_requested(self, transaction: Transaction) -> None:
         """Handle edit request from table.
 
         Args:
@@ -630,15 +643,43 @@ class TransactionsView(QWidget):
         sheets = self._context.state.sheets.value
         available_sheets = self._get_ordered_sheet_names(sheets)
 
+        # Pre-load categories to avoid async re-entrancy issues
+        income_categories = await self._context.get_categories("income")
+        expense_categories = await self._context.get_categories("expense")
+
+        # Pre-load attachments to avoid async re-entrancy issues
+        # Skip if offline to avoid long timeouts
+        attachments = []
+        is_connected = (
+            not hasattr(self._context, 'connection_state')
+            or self._context.connection_state is None
+            or self._context.connection_state.is_connected
+        )
+        if self._context.attachment_service and is_connected:
+            try:
+                attachments = await asyncio.wait_for(
+                    self._context.attachment_service.get_attachments(transaction.id),
+                    timeout=0.5
+                )
+            except Exception:
+                # Network error - report it so connection state detects outage faster
+                if (hasattr(self._context, 'connection_state')
+                        and self._context.connection_state is not None):
+                    self._context.connection_state.report_network_error()
+                print(f"[ATTACH] Attachments unavailable offline")
+
         # Show edit dialog with available sheets and context for autocomplete
         dialog = EditTransactionDialog(
             transaction, self,
             available_sheets=available_sheets,
-            context=self._context
+            context=self._context,
+            income_categories=income_categories,
+            expense_categories=expense_categories,
+            attachments=attachments,
         )
         if dialog.exec() == QMessageBox.Accepted:
             edited = dialog.get_edited_transaction()
-            asyncio.create_task(self._finalize_edit(transaction, edited, dialog))
+            await self._finalize_edit(transaction, edited, dialog)
 
     async def _finalize_edit(
         self,
@@ -791,6 +832,7 @@ class TransactionsView(QWidget):
         Args:
             transactions: Transactions to delete
         """
+        print(f"[DELETE] Starting delete for {len(transactions)} transactions")
         # Confirm deletion
         count = len(transactions)
         reply = QMessageBox.question(
@@ -803,17 +845,22 @@ class TransactionsView(QWidget):
 
         if reply == QMessageBox.Yes:
             try:
+                print("[DELETE] User confirmed, executing delete commands...")
                 # Create delete commands for each transaction
                 for trans in transactions:
+                    print(f"[DELETE] Deleting transaction {trans.id}...")
                     command = DeleteTransactionCommand(
                         self._context.transaction_repo,
                         trans,
                         audit_service=self._context.audit_service,
                     )
                     await self._context.undo_stack.execute(command)
+                    print(f"[DELETE] Transaction {trans.id} deleted")
 
                 # Reload transactions
+                print("[DELETE] Reloading transactions...")
                 await self._load_transactions()
+                print("[DELETE] Delete complete")
 
             except ConcurrencyError:
                 QMessageBox.warning(
@@ -825,6 +872,7 @@ class TransactionsView(QWidget):
                 await self._load_transactions()
 
             except Exception as e:
+                print(f"[DELETE] Error: {e}")
                 QMessageBox.critical(self, "Error", f"Failed to delete: {e}")
 
     def _on_duplicate_shortcut(self) -> None:
@@ -1204,20 +1252,41 @@ class TransactionsView(QWidget):
             transaction_id: ID of the transaction
             new_files: List of file paths to attach
             remove_ids: List of attachment IDs to remove
-            transaction: Optional transaction for descriptive file naming
+            transaction: Optional transaction for descriptive file naming and audit
         """
         svc = self._context.attachment_service
         if not svc:
             return
 
+        audit = self._context.audit_service
+
         try:
+            # Process removals
             for attachment_id in remove_ids:
+                # Get attachment details before removal (for audit log)
+                attachment = await svc.get_attachment(attachment_id)
+                filename = attachment.filename if attachment else "unknown"
+
                 await svc.remove_attachment(attachment_id)
 
+                # Log the removal
+                if audit and transaction:
+                    await audit.log_attachment_removed(transaction, filename)
+
+            # Process additions
             for file_path in new_files:
-                await svc.attach_file(transaction_id, file_path, transaction)
-        except Exception:
-            pass  # Best-effort; transaction was already saved
+                new_attachment = await svc.attach_file(transaction_id, file_path, transaction)
+
+                # Log the addition
+                if audit and transaction:
+                    await audit.log_attachment_added(transaction, new_attachment.filename)
+        except Exception as e:
+            # Show error to user - attachment operations failed
+            QMessageBox.warning(
+                self,
+                "Attachment Error",
+                f"Transaction saved, but attachment operation failed:\n\n{e}"
+            )
 
     # Keyboard shortcut handlers
 
@@ -1406,26 +1475,28 @@ class TransactionsView(QWidget):
     def _on_approve_shortcut(self) -> None:
         """Handle approve shortcut (A key)."""
         selected = self.transaction_table.get_selected_transactions()
-        # Filter to only expenses that are not planned (income and planned can't be approved)
-        expenses_only = [
+        # Filter to only expenses that aren't already approved (or planned)
+        approvable = [
             t for t in selected
-            if t.type == TransactionType.EXPENSE and t.status != ApprovalStatus.PLANNED
+            if t.type == TransactionType.EXPENSE
+            and t.status not in (ApprovalStatus.PLANNED, ApprovalStatus.APPROVED)
         ]
-        if expenses_only:
+        if approvable:
             # Call the async slot directly (it's already wrapped by asyncSlot)
-            self._on_approve_requested(expenses_only)
+            self._on_approve_requested(approvable)
 
     def _on_reject_shortcut(self) -> None:
         """Handle reject shortcut (R key)."""
         selected = self.transaction_table.get_selected_transactions()
-        # Filter to only expenses that are not planned (income and planned can't be rejected)
-        expenses_only = [
+        # Filter to only expenses that aren't already rejected (or planned)
+        rejectable = [
             t for t in selected
-            if t.type == TransactionType.EXPENSE and t.status != ApprovalStatus.PLANNED
+            if t.type == TransactionType.EXPENSE
+            and t.status not in (ApprovalStatus.PLANNED, ApprovalStatus.REJECTED)
         ]
-        if expenses_only:
+        if rejectable:
             # Call the async slot directly (it's already wrapped by asyncSlot)
-            self._on_reject_requested(expenses_only)
+            self._on_reject_requested(rejectable)
 
     def _on_export_dialog(self) -> None:
         """Handle export dialog shortcut (Ctrl+Shift+E)."""

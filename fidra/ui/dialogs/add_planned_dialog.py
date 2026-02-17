@@ -4,7 +4,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from PySide6.QtCore import Qt, QDate
+import qasync
+from PySide6.QtCore import Qt, QDate, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -33,12 +34,17 @@ class AddPlannedDialog(QDialog):
     Compact layout similar to EditPlannedDialog.
     """
 
+    # Internal signal for async category loading (to work with qasync)
+    _trigger_load_categories = Signal()
+
     def __init__(
         self,
         current_sheet: str,
         parent=None,
         available_sheets: list[str] | None = None,
         context=None,
+        income_categories: list[str] | None = None,
+        expense_categories: list[str] | None = None,
     ):
         """Initialize the add planned dialog.
 
@@ -46,6 +52,9 @@ class AddPlannedDialog(QDialog):
             current_sheet: Current sheet name for the template
             parent: Parent widget
             available_sheets: List of available sheet names (for All Sheets mode)
+            context: Application context (optional if categories provided)
+            income_categories: Pre-loaded income categories (avoids async loading)
+            expense_categories: Pre-loaded expense categories (avoids async loading)
         """
         super().__init__(parent)
         self._current_sheet = current_sheet
@@ -54,12 +63,24 @@ class AddPlannedDialog(QDialog):
         self._template: Optional[PlannedTemplate] = None
         self._context = context
 
+        # Category cache - use pre-loaded if provided
+        self._income_categories: list[str] = income_categories or []
+        self._expense_categories: list[str] = expense_categories or []
+        self._categories_loaded = bool(income_categories or expense_categories)
+
         self.setWindowTitle("Add Planned Transaction")
         self.setModal(True)
         self.setMinimumWidth(500)
 
+        # Connect internal signal to async handler
+        self._trigger_load_categories.connect(self._handle_load_categories)
+
         self._setup_ui()
         self._setup_completers()
+
+        # Load categories from database only if not pre-loaded
+        if not self._categories_loaded:
+            QTimer.singleShot(0, self._start_load_categories)
 
     def _setup_ui(self) -> None:
         """Set up the dialog UI - compact layout like transaction edit dialog."""
@@ -269,19 +290,63 @@ class AddPlannedDialog(QDialog):
             install_tab_accept(self.category_input, category_completer)
         )
 
+    def _start_load_categories(self) -> None:
+        """Start loading categories from database."""
+        if self._context:
+            self._trigger_load_categories.emit()
+
+    @qasync.asyncSlot()
+    async def _handle_load_categories(self) -> None:
+        """Handle async category loading (via signal)."""
+        try:
+            await self._load_categories()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                pass  # Ignore qasync re-entrancy, fall back to defaults
+        except Exception:
+            pass  # Fall back to defaults on error
+
+    async def _load_categories(self) -> None:
+        """Load categories from database asynchronously."""
+        try:
+            self._income_categories = await self._context.get_categories("income")
+            self._expense_categories = await self._context.get_categories("expense")
+            self._categories_loaded = True
+            # Update the category dropdown with loaded categories
+            self._update_category_list()
+        except Exception:
+            # Fall back to defaults on error
+            self._categories_loaded = True
+
     def _update_category_list(self) -> None:
         """Update category dropdown based on selected type."""
         is_expense = self.expense_btn.isChecked()
 
-        if is_expense:
-            categories = [
-                "Groceries", "Transport", "Entertainment", "Utilities",
-                "Rent", "Healthcare", "Education", "Other",
-            ]
+        # Get categories from cache if loaded, otherwise use defaults
+        if self._categories_loaded and self._context:
+            if is_expense:
+                categories = self._expense_categories.copy()
+            else:
+                categories = self._income_categories.copy()
         else:
-            categories = [
-                "Salary", "Freelance", "Investment", "Gift", "Other",
-            ]
+            # Fallback defaults (used before async load completes)
+            if is_expense:
+                categories = [
+                    "Equipment",
+                    "Training",
+                    "Events",
+                    "Administration",
+                    "Travel",
+                    "Other",
+                ]
+            else:
+                categories = [
+                    "Membership Dues",
+                    "Event Income",
+                    "Donations",
+                    "Grants",
+                    "Other Income",
+                ]
 
         current_text = self.category_input.currentText()
         self.category_input.clear()

@@ -6,12 +6,13 @@ and launches the main window.
 """
 
 import asyncio
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import qasync
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -23,44 +24,58 @@ from fidra.ui.dialogs.setup_wizard import SetupWizard
 from fidra.ui.dialogs.file_chooser import FileChooserDialog
 
 
-def should_restore_last_file(settings_store: SettingsStore) -> tuple[bool, Path | None]:
-    """Check if we should restore the last opened file.
+def should_restore_last_session(settings_store: SettingsStore) -> tuple[bool, Path | None, str | None]:
+    """Check if we should restore the last session (file or cloud server).
 
-    Returns (should_restore, file_path) where should_restore is True if:
+    Returns (should_restore, file_path, server_id) where should_restore is True if:
     - Settings file exists
-    - last_file exists on disk
+    - For SQLite: last_file exists on disk
+    - For Cloud: active_server_id is set
     - last_opened_at is within 24 hours (or missing for backward compatibility)
     """
     if not settings_store.exists():
-        return False, None
+        return False, None, None
 
     settings = settings_store.load()
-    last_file = settings.storage.last_file
+    backend = settings.storage.backend
     last_opened_at = settings.storage.last_opened_at
 
-    if not last_file or not last_file.exists():
-        return False, None
-
-    # Backward compatibility: if no timestamp, restore anyway (first time with new field)
+    # Check if within time window
+    is_recent = False
     if not last_opened_at:
-        return True, last_file
+        # Backward compatibility: if no timestamp, restore anyway
+        is_recent = True
+    else:
+        try:
+            opened_time = datetime.fromisoformat(last_opened_at)
+            is_recent = datetime.now() - opened_time < timedelta(hours=24)
+        except (ValueError, TypeError):
+            # Invalid timestamp format - restore anyway
+            is_recent = True
 
-    try:
-        opened_time = datetime.fromisoformat(last_opened_at)
-        if datetime.now() - opened_time < timedelta(hours=24):
-            return True, last_file
-    except (ValueError, TypeError):
-        # Invalid timestamp format - restore anyway
-        return True, last_file
-
-    return False, None
+    if backend == "cloud":
+        # Cloud backend - check for active server
+        server_id = settings.storage.active_server_id
+        if server_id and is_recent:
+            # Verify server still exists in config
+            server = settings.storage.get_active_server()
+            if server:
+                return True, None, server_id
+        return False, None, None
+    else:
+        # SQLite backend
+        last_file = settings.storage.last_file
+        if last_file and last_file.exists() and is_recent:
+            return True, last_file, None
+        return False, None, None
 
 
 async def async_cleanup(window_manager: WindowManager) -> None:
-    """Clean up all windows and resources."""
-    print("Closing all windows...")
-    await window_manager.close_all_windows()
-    print("Goodbye!")
+    """Clean up all windows and resources (safe to call multiple times)."""
+    if window_manager.window_count > 0 or window_manager._pending_cleanup:
+        print("Closing all windows...")
+        await window_manager.close_all_windows()
+        print("Goodbye!")
 
 
 def _get_resource_path(relative_path: str) -> Path:
@@ -92,59 +107,102 @@ def run() -> None:
     settings_store = SettingsStore()
     is_first_run = not settings_store.exists()
 
-    # Determine database path
+    # Determine database path or cloud server
     db_path = None
-    show_wizard = False
+    server_id = None
 
-    # Priority 1: Command line argument
+    # Priority 1: Command line argument (SQLite file only)
     if len(sys.argv) > 1:
         db_path = Path(sys.argv[1])
         if not db_path.exists():
             print(f"Warning: File not found: {db_path}")
             db_path = None
 
-    # Priority 2: Check if we should restore last file (within 24 hours)
+    # Priority 2: Check if we should restore last session (within 24 hours)
     last_file_for_chooser = None
+    cloud_servers_for_chooser = None
+    active_server_for_chooser = None
+
     if db_path is None and not is_first_run:
-        should_restore, last_file = should_restore_last_file(settings_store)
-        if should_restore:
-            print(f"Restoring recent file: {last_file}")
-            db_path = last_file
+        # Check if user wants to always show file chooser
+        settings = settings_store.load()
+        always_show_chooser = settings.storage.always_show_file_chooser
+
+        should_restore, last_file, last_server_id = should_restore_last_session(settings_store)
+        if should_restore and not always_show_chooser:
+            if last_server_id:
+                print(f"Restoring recent cloud session")
+                server_id = last_server_id
+            elif last_file:
+                print(f"Restoring recent file: {last_file}")
+                db_path = last_file
+            # Update last_opened_at so the session stays "recent"
+            temp_settings = settings_store.load()
+            temp_settings.storage.last_opened_at = datetime.now().isoformat()
+            settings_store.save(temp_settings)
         else:
-            # Last file is stale (>24 hours) - show file chooser (not wizard)
-            # Keep track of last file to offer as option
-            settings = settings_store.load()
+            # Session is stale (>24 hours) or user prefers file chooser - show it
+            # Keep track of options to offer
             last_file_for_chooser = settings.storage.last_file
+            cloud_servers_for_chooser = settings.storage.cloud_servers
+            active_server_for_chooser = settings.storage.active_server_id
 
     # Priority 3: First run - show setup wizard
-    if db_path is None and is_first_run:
+    if db_path is None and server_id is None and is_first_run:
         wizard = SetupWizard()
         if wizard.exec():
-            db_path = wizard.db_path
-
             # Save wizard settings
             temp_settings = settings_store.load()
             if wizard.user_name:
                 temp_settings.profile.name = wizard.user_name
                 temp_settings.profile.initials = wizard.user_initials or ""
                 temp_settings.profile.first_run_complete = True
-            temp_settings.storage.last_file = db_path
+
+            if wizard.is_cloud:
+                # Cloud server selected
+                server_id = wizard.cloud_server.id
+                temp_settings.storage.add_server(wizard.cloud_server)
+                temp_settings.storage.active_server_id = server_id
+                temp_settings.storage.backend = "cloud"
+            else:
+                # Local file selected
+                db_path = wizard.db_path
+                temp_settings.storage.last_file = db_path
+                temp_settings.storage.backend = "sqlite"
+
             temp_settings.storage.last_opened_at = datetime.now().isoformat()
             settings_store.save(temp_settings)
         else:
             # User cancelled - exit
             sys.exit(0)
 
-    # Priority 4: Returning user with stale file - show file chooser
-    if db_path is None and not is_first_run:
-        chooser = FileChooserDialog(last_file=last_file_for_chooser)
+    # Priority 4: Returning user with stale session - show file chooser
+    if db_path is None and server_id is None and not is_first_run:
+        chooser = FileChooserDialog(
+            last_file=last_file_for_chooser,
+            cloud_servers=cloud_servers_for_chooser,
+            active_server_id=active_server_for_chooser,
+        )
         if chooser.exec():
-            db_path = chooser.db_path
-            # Update settings with new file
-            temp_settings = settings_store.load()
-            temp_settings.storage.last_file = db_path
-            temp_settings.storage.last_opened_at = datetime.now().isoformat()
-            settings_store.save(temp_settings)
+            if chooser.is_cloud:
+                server_id = chooser.selected_server_id
+                # Update settings for cloud
+                temp_settings = settings_store.load()
+                # If a new server was configured, add it to the list
+                if chooser.new_server:
+                    temp_settings.storage.add_server(chooser.new_server)
+                temp_settings.storage.active_server_id = server_id
+                temp_settings.storage.last_opened_at = datetime.now().isoformat()
+                temp_settings.storage.backend = "cloud"
+                settings_store.save(temp_settings)
+            else:
+                db_path = chooser.db_path
+                # Update settings with new file
+                temp_settings = settings_store.load()
+                temp_settings.storage.last_file = db_path
+                temp_settings.storage.last_opened_at = datetime.now().isoformat()
+                temp_settings.storage.backend = "sqlite"
+                settings_store.save(temp_settings)
         else:
             # User cancelled - exit
             sys.exit(0)
@@ -153,32 +211,68 @@ def run() -> None:
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
+    # Suppress qasync re-entrancy errors (harmless - tasks retry on next interval)
+    def exception_handler(loop, context):
+        exception = context.get("exception")
+        if exception and "Cannot enter into task" in str(exception):
+            # Silently ignore qasync re-entrancy - background tasks will retry
+            return
+        # For other exceptions, use default handler
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(exception_handler)
+
     # Create window manager
     window_manager = WindowManager(settings_store)
 
-    # Connect window manager signals
+    # Connect window manager signals - do async cleanup before quitting
+    async def do_cleanup_and_quit():
+        print("Cleaning up...")
+        await window_manager.close_all_windows()
+        print("Goodbye!")
+        app.quit()
+
     def on_all_windows_closed():
-        # On macOS, app typically stays open. On other platforms, quit.
-        if sys.platform != 'darwin':
-            app.quit()
+        # Schedule async cleanup
+        asyncio.ensure_future(do_cleanup_and_quit())
 
     window_manager.all_windows_closed.connect(on_all_windows_closed)
 
     with loop:
         try:
             # Create initial window
-            success = window_manager.create_window(db_path=db_path, loop=loop)
+            success = window_manager.create_window(db_path=db_path, server_id=server_id, loop=loop)
 
             # If initial window failed (e.g., invalid database), show file chooser
             if not success:
-                chooser = FileChooserDialog(last_file=None)
+                settings = settings_store.load()
+                chooser = FileChooserDialog(
+                    last_file=None,
+                    cloud_servers=settings.storage.cloud_servers,
+                    active_server_id=settings.storage.active_server_id,
+                )
                 if chooser.exec():
-                    db_path = chooser.db_path
-                    temp_settings = settings_store.load()
-                    temp_settings.storage.last_file = db_path
-                    temp_settings.storage.last_opened_at = datetime.now().isoformat()
-                    settings_store.save(temp_settings)
-                    success = window_manager.create_window(db_path=db_path, loop=loop)
+                    if chooser.is_cloud:
+                        server_id = chooser.selected_server_id
+                        db_path = None
+                        # Update settings for cloud
+                        temp_settings = settings_store.load()
+                        # If a new server was configured, add it to the list
+                        if chooser.new_server:
+                            temp_settings.storage.add_server(chooser.new_server)
+                        temp_settings.storage.active_server_id = server_id
+                        temp_settings.storage.last_opened_at = datetime.now().isoformat()
+                        temp_settings.storage.backend = "cloud"
+                        settings_store.save(temp_settings)
+                    else:
+                        db_path = chooser.db_path
+                        server_id = None
+                        temp_settings = settings_store.load()
+                        temp_settings.storage.last_file = db_path
+                        temp_settings.storage.last_opened_at = datetime.now().isoformat()
+                        temp_settings.storage.backend = "sqlite"
+                        settings_store.save(temp_settings)
+                    success = window_manager.create_window(db_path=db_path, server_id=server_id, loop=loop)
 
                 if not success:
                     # Still failed or user cancelled - exit
@@ -195,9 +289,15 @@ def run() -> None:
         except KeyboardInterrupt:
             print("\nShutting down...")
         finally:
-            # Cleanup all windows
-            loop.run_until_complete(async_cleanup(window_manager))
+            # Cleanup all windows (may already be done if closed via UI)
+            try:
+                loop.run_until_complete(async_cleanup(window_manager))
+            except RuntimeError:
+                # Event loop already stopped - cleanup was done before quit
+                pass
             loop.close()
+            # Force exit - qasync context manager can hang on macOS
+            os._exit(0)
 
 
 if __name__ == "__main__":

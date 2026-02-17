@@ -2,7 +2,8 @@
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+import qasync
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -169,7 +170,12 @@ class ManageCategoriesDialog(QDialog):
     - Separate tabs for income and expense categories
     - Add, edit, delete categories
     - Reorder categories (drag and drop or up/down buttons)
+    - Categories stored per-database (not in global settings)
     """
+
+    # Internal signals for async operations (to work with qasync)
+    _trigger_load_categories = Signal()
+    _trigger_save_categories = Signal()
 
     def __init__(self, context: "ApplicationContext", parent=None):
         """Initialize manage categories dialog.
@@ -180,7 +186,14 @@ class ManageCategoriesDialog(QDialog):
         """
         super().__init__(parent)
         self._context = context
+
+        # Connect internal signals to async handlers
+        self._trigger_load_categories.connect(self._handle_load_categories)
+        self._trigger_save_categories.connect(self._handle_save_categories)
+
         self._setup_ui()
+        # Load categories from database asynchronously (deferred)
+        QTimer.singleShot(0, lambda: self._trigger_load_categories.emit())
 
     def _setup_ui(self) -> None:
         """Set up the UI layout."""
@@ -207,18 +220,12 @@ class ManageCategoriesDialog(QDialog):
         # Tab widget for income/expense
         self.tab_widget = QTabWidget()
 
-        # Income categories tab
-        self.income_list = CategoryListWidget(
-            self._context.settings.income_categories.copy(),
-            "Income"
-        )
+        # Income categories tab - initially empty, loaded async
+        self.income_list = CategoryListWidget([], "Income")
         self.tab_widget.addTab(self.income_list, "Income Categories")
 
-        # Expense categories tab
-        self.expense_list = CategoryListWidget(
-            self._context.settings.expense_categories.copy(),
-            "Expense"
-        )
+        # Expense categories tab - initially empty, loaded async
+        self.expense_list = CategoryListWidget([], "Expense")
         self.tab_widget.addTab(self.expense_list, "Expense Categories")
 
         layout.addWidget(self.tab_widget)
@@ -227,9 +234,10 @@ class ManageCategoriesDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
-        save_btn = QPushButton("Save")
-        save_btn.clicked.connect(self._on_save)
-        button_layout.addWidget(save_btn)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.clicked.connect(self._on_save)
+        self.save_btn.setEnabled(False)  # Disabled until categories loaded
+        button_layout.addWidget(self.save_btn)
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
@@ -237,19 +245,70 @@ class ManageCategoriesDialog(QDialog):
 
         layout.addLayout(button_layout)
 
+    @qasync.asyncSlot()
+    async def _handle_load_categories(self) -> None:
+        """Handle async category loading (via signal)."""
+        try:
+            await self._load_categories()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                raise  # Re-raise non-qasync errors (handled by _load_categories)
+
+    @qasync.asyncSlot()
+    async def _handle_save_categories(self) -> None:
+        """Handle async category saving (via signal)."""
+        try:
+            await self._save_categories()
+        except RuntimeError as e:
+            if "Cannot enter into task" not in str(e):
+                raise  # Re-raise non-qasync errors (handled by _save_categories)
+
+    async def _load_categories(self) -> None:
+        """Load categories from database."""
+        try:
+            income_cats = await self._context.get_categories("income")
+            expense_cats = await self._context.get_categories("expense")
+
+            # Populate the list widgets
+            for cat in income_cats:
+                self.income_list.list_widget.addItem(cat)
+            for cat in expense_cats:
+                self.expense_list.list_widget.addItem(cat)
+
+            # Enable save button now that categories are loaded
+            self.save_btn.setEnabled(True)
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to load categories:\n\n{e}"
+            )
+
     def _on_save(self) -> None:
         """Save categories and close dialog."""
-        # Update settings
-        self._context.settings.income_categories = self.income_list.get_categories()
-        self._context.settings.expense_categories = self.expense_list.get_categories()
+        self._trigger_save_categories.emit()
 
-        # Save settings to disk
-        self._context.save_settings()
+    async def _save_categories(self) -> None:
+        """Save categories to database asynchronously."""
+        try:
+            # Get current categories from the list widgets
+            income_cats = self.income_list.get_categories()
+            expense_cats = self.expense_list.get_categories()
 
-        QMessageBox.information(
-            self,
-            "Saved",
-            "Categories have been saved."
-        )
+            # Save to database
+            await self._context.set_categories("income", income_cats)
+            await self._context.set_categories("expense", expense_cats)
 
-        self.accept()
+            QMessageBox.information(
+                self,
+                "Saved",
+                "Categories have been saved."
+            )
+
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to save categories:\n\n{e}"
+            )

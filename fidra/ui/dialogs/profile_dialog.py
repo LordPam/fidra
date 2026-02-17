@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -112,7 +113,29 @@ class ProfileDialog(QDialog):
         initials_hint.setObjectName("secondary_text")
         layout.addWidget(initials_hint)
 
-        layout.addSpacing(8)
+        layout.addSpacing(16)
+
+        # Startup section (not shown on first run)
+        if not self._first_run:
+            startup_header = QLabel("Startup")
+            startup_header.setObjectName("section_header")
+            layout.addWidget(startup_header)
+
+            self.always_show_chooser = QCheckBox("Always show file chooser on startup")
+            self.always_show_chooser.setChecked(
+                self._context.settings.storage.always_show_file_chooser
+            )
+            layout.addWidget(self.always_show_chooser)
+
+            startup_hint = QLabel(
+                "When enabled, you'll choose which database to open each time. "
+                "Otherwise, the last used database opens automatically."
+            )
+            startup_hint.setWordWrap(True)
+            startup_hint.setObjectName("secondary_text")
+            layout.addWidget(startup_hint)
+
+            layout.addSpacing(8)
 
         # Buttons
         if self._first_run:
@@ -145,6 +168,13 @@ class ProfileDialog(QDialog):
         self._context.settings.profile.name = name
         self._context.settings.profile.initials = initials
         self._context.settings.profile.first_run_complete = True
+
+        # Update startup setting (not on first run)
+        if not self._first_run:
+            self._context.settings.storage.always_show_file_chooser = (
+                self.always_show_chooser.isChecked()
+            )
+
         self._context.save_settings()
 
         # Update audit service user

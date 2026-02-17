@@ -227,7 +227,11 @@ class TransactionTableModel(QAbstractTableModel):
 
         def get_sort_key(transaction: Transaction):
             if self._sort_column == self.COL_DATE:
-                return (transaction.date, transaction.created_at, transaction.description.lower())
+                # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+                created = transaction.created_at
+                if created and created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                return (transaction.date, created, transaction.description.lower())
             if self._sort_column == self.COL_DESCRIPTION:
                 return transaction.description.lower()
             if self._sort_column == self.COL_AMOUNT:
@@ -325,7 +329,11 @@ class TransactionTableModel(QAbstractTableModel):
         def get_sort_key(transaction: Transaction):
             if column == self.COL_DATE:
                 # Secondary sort by created_at, then description for same-day items
-                return (transaction.date, transaction.created_at, transaction.description.lower())
+                # Normalize created_at for sorting (handle mix of tz-aware and tz-naive)
+                created = transaction.created_at
+                if created and created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                return (transaction.date, created, transaction.description.lower())
             elif column == self.COL_DESCRIPTION:
                 return transaction.description.lower()
             elif column == self.COL_AMOUNT:
