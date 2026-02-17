@@ -407,7 +407,7 @@ main {
 }
 
 .guide-header {
-  margin-bottom: 36px;
+  margin-bottom: 32px;
 }
 
 .guide-back {
@@ -432,117 +432,156 @@ main {
   line-height: 1.6;
 }
 
-.guide-overview {
+/* Step indicator */
+
+.step-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: 8px;
+}
+
+.step-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--stroke);
   background: var(--card);
-  border: 1px solid var(--stroke);
-  border-radius: 14px;
-  padding: 20px 24px;
-  margin-bottom: 28px;
-}
-
-.guide-overview p {
-  margin: 0;
-}
-
-.guide-overview ul {
-  margin: 10px 0 0;
-  padding-left: 20px;
   color: var(--muted);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
-.guide-overview li {
-  margin-bottom: 6px;
-  line-height: 1.5;
+.step-dot:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
-.guide-toc {
-  background: linear-gradient(135deg, rgba(74, 111, 165, 0.1), rgba(31, 34, 32, 0.5));
-  border: 1px solid rgba(74, 111, 165, 0.25);
-  border-radius: 14px;
-  padding: 20px 24px;
-  margin-bottom: 40px;
+.step-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
-.guide-toc h3 {
-  margin: 0 0 12px;
-  font-size: 1rem;
+.step-dot.done {
+  background: rgba(74, 111, 165, 0.25);
+  border-color: var(--accent);
   color: var(--accent);
 }
 
-.guide-toc ol {
-  margin: 0;
-  padding-left: 20px;
+.step-line {
+  flex: 1;
+  max-width: 60px;
+  height: 2px;
+  background: var(--stroke);
+}
+
+.step-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 32px;
+  padding: 0 4px;
+}
+
+.step-labels span {
+  font-size: 0.75rem;
   color: var(--muted);
-  columns: 2;
-  column-gap: 32px;
+  text-align: center;
+  flex: 1;
+  transition: color 0.2s ease;
 }
 
-.guide-toc li {
-  margin-bottom: 6px;
-}
-
-.guide-toc a {
+.step-labels span.active {
   color: var(--text);
-  transition: color 0.15s ease;
+  font-weight: 600;
 }
 
-.guide-toc a:hover {
-  color: var(--gold);
+/* Step panels */
+
+.step-panel {
+  display: none;
 }
 
-.guide-section {
-  margin-bottom: 0;
-  padding: 32px 0;
-  border-bottom: 1px solid var(--stroke);
+.step-panel.active {
+  display: block;
 }
 
-.guide-section:last-of-type {
-  border-bottom: none;
-}
-
-.guide-section h2 {
-  font-size: 1.4rem;
+.step-panel h2 {
+  font-size: 1.5rem;
   margin: 0 0 16px;
-  padding-bottom: 10px;
-  border-bottom: 2px solid rgba(74, 111, 165, 0.3);
-  display: inline-block;
 }
 
-.guide-section h3 {
+.step-panel h3 {
   font-size: 1.1rem;
-  margin: 22px 0 10px;
+  margin: 24px 0 10px;
   color: var(--text);
 }
 
-.guide-section h4 {
+.step-panel h4 {
   font-size: 0.95rem;
   margin: 18px 0 8px;
   color: var(--gold);
 }
 
-.guide-section p {
+.step-panel p {
   color: var(--muted);
   line-height: 1.65;
   margin: 8px 0;
 }
 
-.guide-section ol,
-.guide-section ul {
+.step-panel ol,
+.step-panel ul {
   color: var(--muted);
   padding-left: 22px;
   line-height: 1.7;
   margin: 8px 0;
 }
 
-.guide-section li {
+.step-panel li {
   margin-bottom: 4px;
 }
 
-.guide-section li strong {
+.step-panel li strong {
   color: var(--text);
 }
 
-.guide-section pre {
+.step-panel code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.86em;
+}
+
+.step-panel p code,
+.step-panel li code {
+  background: var(--card);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.84em;
+}
+
+.step-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--stroke);
+}
+
+/* Code blocks with copy */
+
+.code-block {
+  position: relative;
+}
+
+.code-block pre,
+.sql-collapsible pre {
   background: var(--bg-soft);
   border: 1px solid var(--stroke);
   border-radius: 10px;
@@ -553,18 +592,277 @@ main {
   margin: 14px 0;
 }
 
-.guide-section code {
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 0.86em;
+.copy-btn {
+  background: var(--card-strong);
+  color: var(--muted);
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.guide-section p code,
-.guide-section li code {
+.copy-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.code-block .copy-btn {
+  position: absolute;
+  top: 22px;
+  right: 8px;
+}
+
+/* SQL collapsible */
+
+.sql-collapsible {
   background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  margin: 16px 0;
+}
+
+.sql-collapsible summary {
+  padding: 14px 18px;
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sql-collapsible .code-block {
+  padding: 0 18px 18px;
+}
+
+.sql-collapsible pre {
+  margin: 0;
+}
+
+/* Policy collapsibles */
+
+.policy-details {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  margin: 8px 0;
+}
+
+.policy-details summary {
+  padding: 12px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.policy-details ol {
+  padding: 0 16px 14px 38px;
+}
+
+/* Detail cards */
+
+.detail-card {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 20px;
+  margin: 14px 0;
+}
+
+.detail-card h4 {
+  margin: 0 0 8px;
+}
+
+.detail-card p {
+  margin: 0 0 10px;
+}
+
+.detail-card .code-block pre {
+  margin: 0;
+}
+
+/* Form mockup */
+
+.form-mockup {
+  background: #0D1F2F;
+  border: 1px solid #23395B;
+  border-radius: 14px;
+  padding: 24px;
+  margin: 16px 0;
+}
+
+.form-mockup-header {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #D3D3D3;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #23395B;
+}
+
+.form-mockup-group {
+  margin-bottom: 14px;
+}
+
+.form-mockup-group label {
+  display: block;
+  font-size: 0.8rem;
+  color: #A9A9A9;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.form-mockup-input {
+  background: #162A40;
+  border: 1px solid #3A5575;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  color: #D3D3D3;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-mockup-input.password {
+  color: #A9A9A9;
+}
+
+.form-mockup-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #23395B;
+}
+
+.form-mockup-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: default;
+}
+
+.form-mockup-btn.test {
+  background: transparent;
+  border: 1px solid #3A5575;
+  color: #D3D3D3;
+}
+
+.form-mockup-btn.save {
+  background: #BFA159;
+  color: #0D1F2F;
+}
+
+/* Sync flow cards */
+
+.sync-flow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.sync-card {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.sync-icon {
+  width: 36px;
+  height: 36px;
+  margin: 0 auto 12px;
+  color: var(--accent);
+}
+
+.sync-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.sync-card h4 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.sync-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* Guide extras (troubleshooting, security) */
+
+.guide-extras {
+  margin-top: 40px;
+  border-top: 1px solid var(--stroke);
+  padding-top: 24px;
+}
+
+.guide-extra {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  margin-bottom: 12px;
+}
+
+.guide-extra summary {
+  padding: 16px 20px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.extra-content {
+  padding: 0 20px 20px;
+}
+
+.extra-content h4 {
+  font-size: 0.95rem;
+  margin: 16px 0 6px;
+  color: var(--gold);
+}
+
+.extra-content h4:first-child {
+  margin-top: 0;
+}
+
+.extra-content p {
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 4px 0;
+  font-size: 0.92rem;
+}
+
+.extra-content ol {
+  color: var(--muted);
+  padding-left: 22px;
+  line-height: 1.7;
+}
+
+.extra-content li strong {
+  color: var(--text);
+}
+
+.extra-content code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  background: var(--bg-soft);
   padding: 2px 7px;
   border-radius: 4px;
   font-size: 0.84em;
 }
+
+/* Shared guide elements */
 
 .guide-link {
   color: var(--gold);

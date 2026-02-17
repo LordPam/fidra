@@ -31,56 +31,68 @@
       <article class="guide">
         <div class="guide-header">
           <a href="index.html" class="guide-back">&larr; Back to Fidra</a>
-          <h1>Cloud Server Setup Guide</h1>
-          <p class="guide-subtitle">Set up a Supabase cloud backend for Fidra, enabling multi-user access and cloud-hosted data storage.</p>
+          <h1>Cloud Setup Guide</h1>
+          <p class="guide-subtitle">Connect Fidra to a Supabase cloud backend for multi-user access and real-time sync.</p>
         </div>
 
-        <div class="guide-overview">
-          <p>Fidra supports two storage backends:</p>
-          <ul>
-            <li><strong>SQLite</strong> (default) &mdash; Local file storage, single-user</li>
-            <li><strong>Cloud (Supabase)</strong> &mdash; PostgreSQL database with cloud storage for attachments, multi-user support</li>
-          </ul>
+        <!-- Step indicator -->
+        <div class="step-indicator">
+          <button class="step-dot active" data-step="0"><span>1</span></button>
+          <div class="step-line"></div>
+          <button class="step-dot" data-step="1"><span>2</span></button>
+          <div class="step-line"></div>
+          <button class="step-dot" data-step="2"><span>3</span></button>
+          <div class="step-line"></div>
+          <button class="step-dot" data-step="3"><span>4</span></button>
+          <div class="step-line"></div>
+          <button class="step-dot" data-step="4"><span>5</span></button>
+        </div>
+        <div class="step-labels">
+          <span class="active">Create Project</span>
+          <span>Database</span>
+          <span>Storage</span>
+          <span>Connect</span>
+          <span>How It Works</span>
         </div>
 
-        <nav class="guide-toc">
-          <h3>Contents</h3>
-          <ol>
-            <li><a href="#part1">Supabase Project Setup</a></li>
-            <li><a href="#part2">Database Schema</a></li>
-            <li><a href="#part3">Storage Bucket Setup</a></li>
-            <li><a href="#part4">Connecting Fidra to Supabase</a></li>
-            <li><a href="#part5">How Sync Works</a></li>
-            <li><a href="#troubleshooting">Troubleshooting</a></li>
-            <li><a href="#security">Security Considerations</a></li>
-          </ol>
-        </nav>
+        <!-- Step 1: Create Project -->
+        <section class="step-panel active" data-step="0">
+          <h2>Create a Supabase Project</h2>
+          <p>Fidra uses <a href="https://supabase.com" class="guide-link" rel="noreferrer">Supabase</a> as its cloud backend &mdash; a hosted PostgreSQL database with file storage.</p>
 
-        <!-- Part 1 -->
-        <section id="part1" class="guide-section">
-          <h2>Part 1: Supabase Project Setup</h2>
-          <h3>1.1 Create a Supabase Project</h3>
           <ol>
-            <li>Go to <a href="https://supabase.com" class="guide-link" rel="noreferrer">supabase.com</a> and sign in</li>
+            <li>Go to <a href="https://supabase.com" class="guide-link" rel="noreferrer">supabase.com</a> and sign in (or create a free account)</li>
             <li>Click <strong>New Project</strong></li>
             <li>Enter a project name (e.g., "Fidra Finance")</li>
             <li>Set a <strong>database password</strong> &mdash; save this, you'll need it later</li>
             <li>Select a region close to your users</li>
             <li>Click <strong>Create new project</strong></li>
           </ol>
-          <p>Wait for the project to be provisioned (usually 1&ndash;2 minutes).</p>
+
+          <div class="guide-note">
+            <strong>Tip:</strong> The free tier is sufficient for most small teams. You get 500MB database storage and 1GB file storage.
+          </div>
+
+          <p>Wait for the project to be provisioned (usually 1&ndash;2 minutes), then continue to the next step.</p>
+
+          <div class="step-nav">
+            <div></div>
+            <button class="btn primary step-next">Next: Database Schema &rarr;</button>
+          </div>
         </section>
 
-        <!-- Part 2 -->
-        <section id="part2" class="guide-section">
-          <h2>Part 2: Database Schema</h2>
-          <h3>2.1 Create the Database Tables</h3>
-          <ol>
-            <li>In your Supabase dashboard, go to <strong>SQL Editor</strong></li>
-            <li>Click <strong>New query</strong></li>
-            <li>Paste the following SQL and click <strong>Run</strong>:</li>
-          </ol>
-          <pre><code>-- Enable UUID extension
+        <!-- Step 2: Database Schema -->
+        <section class="step-panel" data-step="1">
+          <h2>Set Up the Database</h2>
+          <p>Fidra needs six tables in your Supabase database. Open the <strong>SQL Editor</strong> in your Supabase dashboard, create a new query, paste the SQL below, and click <strong>Run</strong>.</p>
+
+          <details class="sql-collapsible" open>
+            <summary>
+              <span>Full SQL schema</span>
+              <button class="copy-btn" data-target="schema-sql">Copy</button>
+            </summary>
+            <div class="code-block">
+              <pre id="schema-sql"><code>-- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Transactions table
@@ -194,189 +206,212 @@ CREATE POLICY "Full access" ON sheets FOR ALL USING (true);
 CREATE POLICY "Full access" ON attachments FOR ALL USING (true);
 CREATE POLICY "Full access" ON audit_log FOR ALL USING (true);
 CREATE POLICY "Full access" ON categories FOR ALL USING (true);</code></pre>
-        </section>
+            </div>
+          </details>
 
-        <!-- Part 3 -->
-        <section id="part3" class="guide-section">
-          <h2>Part 3: Storage Bucket Setup</h2>
-          <p>Fidra stores receipt attachments in Supabase Storage.</p>
+          <p>The query creates all tables, indexes, and row-level security policies. You should see "Success" in the Supabase SQL editor.</p>
 
-          <h3>3.1 Create the Attachments Bucket</h3>
-          <ol>
-            <li>In your Supabase dashboard, go to <strong>Storage</strong> (left sidebar)</li>
-            <li>Click <strong>New bucket</strong></li>
-            <li>Enter the name: <code>attachments</code></li>
-            <li>Leave "Public bucket" <strong>unchecked</strong> (private bucket)</li>
-            <li>Click <strong>Create bucket</strong></li>
-          </ol>
-
-          <h3>3.2 Configure Bucket Policies</h3>
-          <p>The bucket needs policies to allow uploads, downloads, and deletes.</p>
-          <ol>
-            <li>Click on the <strong>attachments</strong> bucket</li>
-            <li>Go to the <strong>Policies</strong> tab</li>
-            <li>Create three policies:</li>
-          </ol>
-
-          <h4>Policy 1: Allow Uploads (INSERT)</h4>
-          <ol>
-            <li>Click <strong>New policy</strong> &rarr; <strong>For full customization</strong></li>
-            <li>Policy name: <code>Allow uploads</code></li>
-            <li>Allowed operation: <code>INSERT</code></li>
-            <li>Target roles: <code>anon</code></li>
-            <li>Policy definition: <code>true</code></li>
-            <li>Click <strong>Review</strong> then <strong>Save policy</strong></li>
-          </ol>
-
-          <h4>Policy 2: Allow Downloads (SELECT)</h4>
-          <ol>
-            <li>Click <strong>New policy</strong> &rarr; <strong>For full customization</strong></li>
-            <li>Policy name: <code>Allow downloads</code></li>
-            <li>Allowed operation: <code>SELECT</code></li>
-            <li>Target roles: <code>anon</code></li>
-            <li>Policy definition: <code>true</code></li>
-            <li>Click <strong>Review</strong> then <strong>Save policy</strong></li>
-          </ol>
-
-          <h4>Policy 3: Allow Deletes (DELETE)</h4>
-          <ol>
-            <li>Click <strong>New policy</strong> &rarr; <strong>For full customization</strong></li>
-            <li>Policy name: <code>Allow deletes</code></li>
-            <li>Allowed operation: <code>DELETE</code></li>
-            <li>Target roles: <code>anon</code></li>
-            <li>Policy definition: <code>true</code></li>
-            <li>Click <strong>Review</strong> then <strong>Save policy</strong></li>
-          </ol>
-
-          <div class="guide-note">
-            <strong>Note:</strong> When creating the DELETE policy, Supabase may require you to also select SELECT. This is fine &mdash; it will create two policies under the same name.
+          <div class="step-nav">
+            <button class="btn ghost step-back">&larr; Back</button>
+            <button class="btn primary step-next">Next: Storage Bucket &rarr;</button>
           </div>
         </section>
 
-        <!-- Part 4 -->
-        <section id="part4" class="guide-section">
-          <h2>Part 4: Connecting Fidra to Supabase</h2>
+        <!-- Step 3: Storage Bucket -->
+        <section class="step-panel" data-step="2">
+          <h2>Set Up File Storage</h2>
+          <p>Fidra stores receipt attachments in Supabase Storage. You need to create a bucket and set access policies.</p>
 
-          <h3>4.1 Gather Connection Details</h3>
-          <p>You'll need three pieces of information from Supabase:</p>
-
-          <h4>Database Connection String</h4>
+          <h3>Create the bucket</h3>
           <ol>
-            <li>In Supabase dashboard, click the <strong>Connect</strong> button (top navigation bar)</li>
-            <li>Go to the <strong>Connection string</strong> tab</li>
-            <li>Set: Type = <code>URI</code>, Source = <code>Primary Database</code>, Method = <code>Transaction Pooler</code></li>
-            <li>Copy the connection string</li>
-            <li>Replace <code>[YOUR-PASSWORD]</code> with your <strong>database password</strong></li>
-          </ol>
-          <pre><code>postgresql://postgres.xxxxxxxxxxxx:[YOUR-PASSWORD]@aws-0-xx-xxxx.pooler.supabase.com:6543/postgres</code></pre>
-
-          <h4>Project URL and API Key</h4>
-          <ol>
-            <li>Go to <strong>Project Settings</strong> (gear icon, bottom of left sidebar)</li>
-            <li>Click <strong>API</strong> in the settings menu</li>
-            <li>Copy the <strong>Project URL</strong> and <strong>anon public</strong> key</li>
+            <li>In your Supabase dashboard, go to <strong>Storage</strong> (left sidebar)</li>
+            <li>Click <strong>New bucket</strong></li>
+            <li>Name: <code>attachments</code></li>
+            <li>Leave "Public bucket" <strong>unchecked</strong></li>
+            <li>Click <strong>Create bucket</strong></li>
           </ol>
 
-          <h3>4.2 Configure in Fidra</h3>
+          <h3>Add access policies</h3>
+          <p>Click on the <strong>attachments</strong> bucket, go to the <strong>Policies</strong> tab, and create these three policies:</p>
 
-          <h4>First-Time Setup (Setup Wizard)</h4>
-          <ol>
-            <li>Launch Fidra</li>
-            <li>On the database selection screen, click <strong>Configure Server...</strong></li>
-            <li>Fill in: Server Name, Project URL, Anon Key, Database Connection String</li>
-            <li>Click <strong>Test Connection</strong> to verify</li>
-            <li>Click <strong>Save</strong></li>
-          </ol>
+          <details class="policy-details">
+            <summary>Policy 1: Allow Uploads (INSERT)</summary>
+            <ol>
+              <li>Click <strong>New policy</strong> &rarr; <strong>For full customization</strong></li>
+              <li>Policy name: <code>Allow uploads</code></li>
+              <li>Allowed operation: <code>INSERT</code></li>
+              <li>Target roles: <code>anon</code></li>
+              <li>Policy definition: <code>true</code></li>
+              <li>Click <strong>Review</strong> then <strong>Save policy</strong></li>
+            </ol>
+          </details>
 
-          <h4>Adding a Server Later</h4>
-          <ol>
-            <li>Launch Fidra</li>
-            <li>On the welcome screen, click <strong>Connect to Different Server...</strong></li>
-            <li>Click <strong>+ Configure New Server...</strong></li>
-            <li>Fill in the details, test, and save</li>
-          </ol>
+          <details class="policy-details">
+            <summary>Policy 2: Allow Downloads (SELECT)</summary>
+            <ol>
+              <li>Click <strong>New policy</strong> &rarr; <strong>For full customization</strong></li>
+              <li>Policy name: <code>Allow downloads</code></li>
+              <li>Allowed operation: <code>SELECT</code></li>
+              <li>Target roles: <code>anon</code></li>
+              <li>Policy definition: <code>true</code></li>
+              <li>Click <strong>Review</strong> then <strong>Save policy</strong></li>
+            </ol>
+          </details>
 
-          <h4>From Within the App</h4>
-          <ol>
-            <li>Go to <strong>Settings</strong> (gear icon) &rarr; <strong>Cloud Servers...</strong></li>
-            <li>Click <strong>Add Server</strong></li>
-            <li>Fill in the connection details</li>
-            <li>Click <strong>Test Connection</strong> then <strong>Save</strong></li>
-            <li>Select the server and click <strong>Connect</strong></li>
-          </ol>
+          <details class="policy-details">
+            <summary>Policy 3: Allow Deletes (DELETE)</summary>
+            <ol>
+              <li>Click <strong>New policy</strong> &rarr; <strong>For full customization</strong></li>
+              <li>Policy name: <code>Allow deletes</code></li>
+              <li>Allowed operation: <code>DELETE</code></li>
+              <li>Target roles: <code>anon</code></li>
+              <li>Policy definition: <code>true</code></li>
+              <li>Click <strong>Review</strong> then <strong>Save policy</strong></li>
+            </ol>
+          </details>
+
+          <div class="guide-note">
+            <strong>Note:</strong> When creating the DELETE policy, Supabase may require you to also select SELECT. This is fine.
+          </div>
+
+          <div class="step-nav">
+            <button class="btn ghost step-back">&larr; Back</button>
+            <button class="btn primary step-next">Next: Connect Fidra &rarr;</button>
+          </div>
         </section>
 
-        <!-- Part 5 -->
-        <section id="part5" class="guide-section">
-          <h2>Part 5: How Sync Works</h2>
-          <p>Once connected, Fidra uses an offline-first architecture:</p>
+        <!-- Step 4: Connect Fidra -->
+        <section class="step-panel" data-step="3">
+          <h2>Connect Fidra to Supabase</h2>
+          <p>Gather three pieces of information from your Supabase dashboard, then enter them in Fidra.</p>
 
-          <h3>Local Cache</h3>
-          <p>All data is cached locally in a SQLite database. Reads always come from the local cache for instant response, even when offline.</p>
+          <h3>1. Get your connection details</h3>
 
-          <h3>Pushing Changes (Local to Cloud)</h3>
-          <p>When you create, edit, or delete a transaction, the change is:</p>
-          <ol>
-            <li>Applied to the local cache immediately</li>
-            <li>Queued in a persistent sync queue (survives app restarts)</li>
-            <li>Pushed to PostgreSQL in the background within ~1 second</li>
-          </ol>
-          <p>If the network is down, changes accumulate in the queue and sync automatically when connectivity returns.</p>
+          <div class="detail-card">
+            <h4>Database Connection String</h4>
+            <p>Click <strong>Connect</strong> (top bar) &rarr; <strong>Connection string</strong> tab &rarr; set Type = <code>URI</code>, Source = <code>Primary Database</code>, Method = <code>Transaction Pooler</code>. Copy the string and replace <code>[YOUR-PASSWORD]</code> with your database password.</p>
+            <div class="code-block">
+              <pre id="conn-string"><code>postgresql://postgres.xxxx:[YOUR-PASSWORD]@aws-0-xx-xxxx.pooler.supabase.com:6543/postgres</code></pre>
+              <button class="copy-btn" data-target="conn-string">Copy</button>
+            </div>
+          </div>
 
-          <h3>Receiving Changes (Cloud to Local)</h3>
-          <p>Fidra installs PostgreSQL LISTEN/NOTIFY triggers on the synced tables. When another device makes changes, Fidra receives a notification within seconds, refreshes the affected caches, and updates the UI.</p>
+          <div class="detail-card">
+            <h4>Project URL &amp; Anon Key</h4>
+            <p>Go to <strong>Project Settings</strong> (gear icon) &rarr; <strong>API</strong>. Copy the <strong>Project URL</strong> and <strong>anon public</strong> key.</p>
+          </div>
 
-          <h3>Connection Recovery</h3>
-          <ul>
-            <li><strong>Health checks</strong> run every 30 seconds when connected</li>
-            <li>If the connection is lost, Fidra attempts reconnection with exponential backoff</li>
-            <li>Once offline, recovery checks run every 5 seconds</li>
-            <li>When network returns, the app reconnects automatically (no restart needed)</li>
-            <li>The status bar indicator shows connection state (green/yellow/red) with a manual Reconnect button</li>
-          </ul>
+          <h3>2. Enter them in Fidra</h3>
+          <p>This is what the connection form looks like in the app:</p>
+
+          <div class="form-mockup">
+            <div class="form-mockup-header">Add Cloud Server</div>
+            <div class="form-mockup-group">
+              <label>Name</label>
+              <div class="form-mockup-input">Sub Aqua Club</div>
+            </div>
+            <div class="form-mockup-group">
+              <label>Connection</label>
+              <div class="form-mockup-input password">postgresql://postgres.abc:&bull;&bull;&bull;&bull;&bull;&bull;@aws-0-eu.pooler.supabase.com:6543/postgres</div>
+            </div>
+            <div class="form-mockup-group">
+              <label>URL</label>
+              <div class="form-mockup-input">https://abcdefghij.supabase.co</div>
+            </div>
+            <div class="form-mockup-group">
+              <label>Anon Key</label>
+              <div class="form-mockup-input password">eyJhbGciOiJIUzI1NiIsInR5cCI6&bull;&bull;&bull;&bull;&bull;&bull;</div>
+            </div>
+            <div class="form-mockup-group">
+              <label>Bucket</label>
+              <div class="form-mockup-input">attachments</div>
+            </div>
+            <div class="form-mockup-actions">
+              <span class="form-mockup-btn test">Test Connection</span>
+              <span class="form-mockup-btn save">Save</span>
+            </div>
+          </div>
+
+          <p>You can access this form from the <strong>Setup Wizard</strong> (first launch), the <strong>Welcome screen</strong>, or from <strong>Settings &rarr; Cloud Servers</strong>.</p>
+
+          <div class="step-nav">
+            <button class="btn ghost step-back">&larr; Back</button>
+            <button class="btn primary step-next">Next: How It Works &rarr;</button>
+          </div>
         </section>
 
-        <!-- Troubleshooting -->
-        <section id="troubleshooting" class="guide-section">
-          <h2>Troubleshooting</h2>
+        <!-- Step 5: How It Works -->
+        <section class="step-panel" data-step="4">
+          <h2>How Sync Works</h2>
+          <p>Once connected, Fidra uses an offline-first architecture. Everything stays fast regardless of network conditions.</p>
 
-          <h3>"Bucket not found" error</h3>
+          <div class="sync-flow">
+            <div class="sync-card">
+              <div class="sync-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <h4>Local cache</h4>
+              <p>All data cached in a local SQLite database. Reads are always instant &mdash; even offline.</p>
+            </div>
+            <div class="sync-card">
+              <div class="sync-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+              </div>
+              <h4>Background sync</h4>
+              <p>Changes queue locally and push to PostgreSQL within ~1 second. If offline, they sync when connectivity returns.</p>
+            </div>
+            <div class="sync-card">
+              <div class="sync-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+              <h4>Real-time updates</h4>
+              <p>Changes from other devices arrive via PostgreSQL LISTEN/NOTIFY. The UI updates automatically.</p>
+            </div>
+          </div>
+
+          <h3>Connection recovery</h3>
           <ul>
-            <li>Verify the bucket is named exactly <code>attachments</code></li>
-            <li>Check that storage policies are configured</li>
+            <li>Health checks run every 30 seconds</li>
+            <li>Lost connections retry with exponential backoff</li>
+            <li>The status bar shows connection state (green/yellow/red) with a manual reconnect button</li>
+            <li>No restart needed &mdash; Fidra reconnects automatically</li>
           </ul>
 
-          <h3>"400 Bad Request" when uploading attachments</h3>
-          <ul>
-            <li>Verify the INSERT policy exists on the storage bucket</li>
-            <li>Check that the anon key is correct</li>
-          </ul>
-
-          <h3>Connection timeout</h3>
-          <ul>
-            <li>Verify the connection string is correct</li>
-            <li>Check that you're using "Transaction Pooler" method</li>
-            <li>Ensure your database password is correct (no <code>[YOUR-PASSWORD]</code> placeholder)</li>
-          </ul>
-
-          <h3>"Permission denied" errors</h3>
-          <ul>
-            <li>Verify RLS policies are created on all tables</li>
-            <li>Check that the anon key has the correct permissions</li>
-          </ul>
+          <div class="step-nav">
+            <button class="btn ghost step-back">&larr; Back</button>
+            <div></div>
+          </div>
         </section>
 
-        <!-- Security -->
-        <section id="security" class="guide-section">
-          <h2>Security Considerations</h2>
-          <p>The default setup uses permissive policies (<code>true</code>) which allow any request full access. For production use with multiple organisations, consider:</p>
-          <ol>
-            <li><strong>Row-Level Security</strong> &mdash; Add user/organisation columns and filter by authenticated user</li>
-            <li><strong>Service Role Key</strong> &mdash; Use for server-side operations only, never expose in client apps</li>
-            <li><strong>Custom Policies</strong> &mdash; Restrict access based on user roles or organisation membership</li>
-          </ol>
-          <p>For a single organisation with trusted users, the default policies are sufficient.</p>
-        </section>
+        <!-- Troubleshooting & Security (outside wizard) -->
+        <div class="guide-extras">
+          <details class="guide-extra">
+            <summary>Troubleshooting</summary>
+            <div class="extra-content">
+              <h4>"Bucket not found" error</h4>
+              <p>Verify the bucket is named exactly <code>attachments</code> and that storage policies are configured.</p>
+              <h4>"400 Bad Request" when uploading</h4>
+              <p>Verify the INSERT policy exists on the storage bucket and the anon key is correct.</p>
+              <h4>Connection timeout</h4>
+              <p>Check the connection string, ensure you're using "Transaction Pooler" method, and verify the password (no <code>[YOUR-PASSWORD]</code> placeholder).</p>
+              <h4>"Permission denied" errors</h4>
+              <p>Verify RLS policies are created on all tables and the anon key has correct permissions.</p>
+            </div>
+          </details>
+
+          <details class="guide-extra">
+            <summary>Security Considerations</summary>
+            <div class="extra-content">
+              <p>The default setup uses permissive policies (<code>true</code>) which allow any request full access. For production use with multiple organisations, consider:</p>
+              <ol>
+                <li><strong>Row-Level Security</strong> &mdash; add user/organisation columns and filter by authenticated user</li>
+                <li><strong>Service Role Key</strong> &mdash; use for server-side operations only, never expose in client apps</li>
+                <li><strong>Custom Policies</strong> &mdash; restrict access based on user roles or organisation membership</li>
+              </ol>
+              <p>For a single organisation with trusted users, the default policies are sufficient.</p>
+            </div>
+          </details>
+        </div>
 
         <div class="guide-footer">
           <a href="index.html" class="btn ghost">&larr; Back to Fidra</a>
@@ -391,5 +426,63 @@ CREATE POLICY "Full access" ON categories FOR ALL USING (true);</code></pre>
         <a href="index.html#downloads">Download</a>
       </div>
     </footer>
+
+    <script>
+    (function () {
+      const panels = document.querySelectorAll('.step-panel');
+      const dots = document.querySelectorAll('.step-dot');
+      const labels = document.querySelectorAll('.step-labels span');
+      let current = 0;
+
+      function goTo(step) {
+        if (step < 0 || step >= panels.length) return;
+        panels[current].classList.remove('active');
+        dots[current].classList.remove('active');
+        labels[current].classList.remove('active');
+        // Mark completed steps
+        for (let i = 0; i < step; i++) {
+          dots[i].classList.add('done');
+        }
+        for (let i = step; i < dots.length; i++) {
+          dots[i].classList.remove('done');
+        }
+        current = step;
+        panels[current].classList.add('active');
+        dots[current].classList.add('active');
+        labels[current].classList.remove('done');
+        labels[current].classList.add('active');
+        // Scroll to top of guide
+        document.querySelector('.step-indicator').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      dots.forEach(function (dot) {
+        dot.addEventListener('click', function () {
+          goTo(parseInt(this.dataset.step));
+        });
+      });
+
+      document.querySelectorAll('.step-next').forEach(function (btn) {
+        btn.addEventListener('click', function () { goTo(current + 1); });
+      });
+
+      document.querySelectorAll('.step-back').forEach(function (btn) {
+        btn.addEventListener('click', function () { goTo(current - 1); });
+      });
+
+      // Copy buttons
+      document.querySelectorAll('.copy-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var target = document.getElementById(this.dataset.target);
+          var text = target ? target.textContent : '';
+          navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = 'Copied!';
+            setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+          });
+        });
+      });
+    })();
+    </script>
   </body>
 </html>
