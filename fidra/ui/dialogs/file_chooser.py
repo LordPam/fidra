@@ -48,6 +48,7 @@ class ServerSelectionDialog(QDialog):
         servers: list["CloudServerConfig"],
         active_server_id: Optional[str] = None,
         parent=None,
+        mode: str = "startup",
     ):
         super().__init__(parent)
         self.setWindowTitle("Select Server")
@@ -56,18 +57,20 @@ class ServerSelectionDialog(QDialog):
 
         self._servers = servers
         self._active_server_id = active_server_id
+        self._mode = mode
         self._selected_server: Optional["CloudServerConfig"] = None
         self._new_server: Optional["CloudServerConfig"] = None
 
-        self.setStyleSheet(f"""
-            QDialog {{
-                background: {DEEP_NAVY};
-            }}
-            QLabel {{
-                color: {LIGHT_GRAY};
-                background: transparent;
-            }}
-        """)
+        if mode == "startup":
+            self.setStyleSheet(f"""
+                QDialog {{
+                    background: {DEEP_NAVY};
+                }}
+                QLabel {{
+                    color: {LIGHT_GRAY};
+                    background: transparent;
+                }}
+            """)
 
         self._setup_ui()
 
@@ -78,25 +81,42 @@ class ServerSelectionDialog(QDialog):
 
         # Header
         header = QLabel("Select Server")
-        header.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {LIGHT_GRAY};")
+        if self._mode == "startup":
+            header.setStyleSheet(f"font-size: 18px; font-weight: 600; color: {LIGHT_GRAY};")
+        else:
+            header.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(header)
 
         # Server buttons
-        btn_style = f"""
-            QPushButton {{
-                background: rgba(35, 57, 91, 0.6);
-                color: {LIGHT_GRAY};
-                border: 1px solid rgba(169, 169, 169, 0.3);
-                border-radius: 8px;
-                padding: 12px 16px;
-                font-size: 14px;
-                text-align: left;
-            }}
-            QPushButton:hover {{
-                background: rgba(35, 57, 91, 0.9);
-                border-color: rgba(169, 169, 169, 0.5);
-            }}
-        """
+        if self._mode == "startup":
+            btn_style = f"""
+                QPushButton {{
+                    background: rgba(35, 57, 91, 0.6);
+                    color: {LIGHT_GRAY};
+                    border: 1px solid rgba(169, 169, 169, 0.3);
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    font-size: 14px;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: rgba(35, 57, 91, 0.9);
+                    border-color: rgba(169, 169, 169, 0.5);
+                }}
+            """
+        else:
+            btn_style = """
+                QPushButton {
+                    border: 1px solid palette(mid);
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    font-size: 14px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    border-color: palette(light);
+                }
+            """
 
         # Show all servers except the active one (which is already shown in main dialog)
         for server in self._servers:
@@ -116,27 +136,41 @@ class ServerSelectionDialog(QDialog):
         # Separator
         layout.addSpacing(8)
         separator = QLabel("or")
-        separator.setStyleSheet(f"font-size: 12px; color: {DARK_GRAY};")
+        if self._mode == "startup":
+            separator.setStyleSheet(f"font-size: 12px; color: {DARK_GRAY};")
+        else:
+            separator.setStyleSheet("font-size: 12px;")
         separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(separator)
         layout.addSpacing(8)
 
         # Add new server button
         add_btn = QPushButton("+ Configure New Server...")
-        add_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {CLOUD_ACCENT};
-                color: {DEEP_NAVY};
-                border: none;
-                border-radius: 8px;
-                padding: 12px 16px;
-                font-size: 14px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background: #93C5FD;
-            }}
-        """)
+        if self._mode == "startup":
+            add_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {CLOUD_ACCENT};
+                    color: {DEEP_NAVY};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    font-size: 14px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background: #93C5FD;
+                }}
+            """)
+        else:
+            add_btn.setStyleSheet("""
+                QPushButton {
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    font-size: 14px;
+                    font-weight: 600;
+                }
+            """)
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.clicked.connect(self._add_new_server)
         layout.addWidget(add_btn)
@@ -145,18 +179,28 @@ class ServerSelectionDialog(QDialog):
 
         # Cancel button
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {MID_GRAY};
-                border: none;
-                padding: 8px;
-                font-size: 13px;
-            }}
-            QPushButton:hover {{
-                color: {LIGHT_GRAY};
-            }}
-        """)
+        if self._mode == "startup":
+            cancel_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {MID_GRAY};
+                    border: none;
+                    padding: 8px;
+                    font-size: 13px;
+                }}
+                QPushButton:hover {{
+                    color: {LIGHT_GRAY};
+                }}
+            """)
+        else:
+            cancel_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    padding: 8px;
+                    font-size: 13px;
+                }
+            """)
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.clicked.connect(self.reject)
         layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -170,9 +214,9 @@ class ServerSelectionDialog(QDialog):
         """Open dialog to add a new server."""
         from fidra.ui.dialogs.cloud_server_dialog import CloudServerDialog
 
-        dialog = CloudServerDialog(parent=self)
+        dialog = CloudServerDialog(parent=self, wizard_theme=(self._mode == "startup"))
         if dialog.exec():
-            self._new_server = dialog.get_server_config()
+            self._new_server = dialog.server_config
             self.accept()
 
     @property
@@ -200,9 +244,11 @@ class FileChooserDialog(QDialog):
         cloud_servers: Optional[list["CloudServerConfig"]] = None,
         active_server_id: Optional[str] = None,
         parent=None,
+        mode: str = "startup",
     ):
         super().__init__(parent)
-        self.setWindowTitle("Fidra")
+        self._mode = mode  # "startup" or "new_window"
+        self.setWindowTitle("Fidra" if mode == "startup" else "Open Database")
         self.setModal(True)
 
         self._last_file = last_file
@@ -213,18 +259,19 @@ class FileChooserDialog(QDialog):
         self._new_server: Optional["CloudServerConfig"] = None  # Track newly added server
 
         self.setFixedWidth(440)
-        self.setMinimumHeight(420)
+        self.setMinimumHeight(420 if mode == "startup" else 320)
 
-        # Apply base styling
-        self.setStyleSheet(f"""
-            QDialog {{
-                background: {DEEP_NAVY};
-            }}
-            QLabel {{
-                color: {LIGHT_GRAY};
-                background: transparent;
-            }}
-        """)
+        # Apply dark styling only for startup screen
+        if mode == "startup":
+            self.setStyleSheet(f"""
+                QDialog {{
+                    background: {DEEP_NAVY};
+                }}
+                QLabel {{
+                    color: {LIGHT_GRAY};
+                    background: transparent;
+                }}
+            """)
 
         self._setup_ui()
 
@@ -234,57 +281,74 @@ class FileChooserDialog(QDialog):
         layout.setContentsMargins(50, 40, 50, 35)
         layout.setSpacing(0)
 
-        # Top spacing
-        layout.addStretch(1)
+        if self._mode == "startup":
+            # Top spacing
+            layout.addStretch(1)
 
-        # Logo container
-        logo_container = QWidget()
-        logo_layout = QHBoxLayout(logo_container)
-        logo_layout.setContentsMargins(0, 0, 0, 0)
-        logo_layout.addStretch()
+            # Logo container
+            logo_container = QWidget()
+            logo_layout = QHBoxLayout(logo_container)
+            logo_layout.setContentsMargins(0, 0, 0, 0)
+            logo_layout.addStretch()
 
-        logo_path = get_resource_path("fidra/ui/theme/icons/icon.svg")
-        if logo_path.exists():
-            logo = QSvgWidget(str(logo_path))
-            logo.setFixedSize(72, 72)
-            logo_layout.addWidget(logo)
-        else:
-            # Fallback text logo
-            logo_label = QLabel("F")
-            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            logo_label.setFixedSize(72, 72)
-            logo_label.setStyleSheet(f"""
-                font-size: 40px;
-                font-weight: bold;
-                color: {GOLD};
-                background: {NAVY};
-                border-radius: 16px;
+            logo_path = get_resource_path("fidra/ui/theme/icons/icon.svg")
+            if logo_path.exists():
+                logo = QSvgWidget(str(logo_path))
+                logo.setFixedSize(72, 72)
+                logo_layout.addWidget(logo)
+            else:
+                # Fallback text logo
+                logo_label = QLabel("F")
+                logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                logo_label.setFixedSize(72, 72)
+                logo_label.setStyleSheet(f"""
+                    font-size: 40px;
+                    font-weight: bold;
+                    color: {GOLD};
+                    background: {NAVY};
+                    border-radius: 16px;
+                """)
+                logo_layout.addWidget(logo_label)
+
+            logo_layout.addStretch()
+            layout.addWidget(logo_container)
+
+            layout.addSpacing(20)
+
+            # Welcome message
+            welcome = QLabel("Welcome back")
+            welcome.setStyleSheet(f"""
+                font-size: 22px;
+                font-weight: 600;
+                color: {LIGHT_GRAY};
             """)
-            logo_layout.addWidget(logo_label)
+            welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(welcome)
 
-        logo_layout.addStretch()
-        layout.addWidget(logo_container)
+            layout.addSpacing(6)
 
-        layout.addSpacing(20)
+            subtitle = QLabel("Choose where to continue")
+            subtitle.setStyleSheet(f"font-size: 13px; color: {MID_GRAY};")
+            subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(subtitle)
 
-        # Welcome message
-        welcome = QLabel("Welcome back")
-        welcome.setStyleSheet(f"""
-            font-size: 22px;
-            font-weight: 600;
-            color: {LIGHT_GRAY};
-        """)
-        welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(welcome)
+            layout.addSpacing(28)
+        else:
+            # New window mode — compact header, no logo
+            layout.addSpacing(8)
 
-        layout.addSpacing(6)
+            header = QLabel("Open Database")
+            header.setStyleSheet("font-size: 18px; font-weight: 600;")
+            header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(header)
 
-        subtitle = QLabel("Choose where to continue")
-        subtitle.setStyleSheet(f"font-size: 13px; color: {MID_GRAY};")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
+            layout.addSpacing(6)
 
-        layout.addSpacing(28)
+            subtitle = QLabel("Choose a file or cloud server")
+            subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(subtitle)
+
+            layout.addSpacing(20)
 
         # Button container for consistent width
         btn_container = QWidget()
@@ -292,85 +356,115 @@ class FileChooserDialog(QDialog):
         btn_layout.setContentsMargins(0, 0, 0, 0)
         btn_layout.setSpacing(12)
 
-        # Primary button style (gold)
-        primary_style = f"""
-            QPushButton {{
-                background: {GOLD};
-                color: {DEEP_NAVY};
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: 600;
-                min-height: 20px;
-            }}
-            QPushButton:hover {{
-                background: #CCAF6A;
-            }}
-            QPushButton:pressed {{
-                background: #A89048;
-            }}
-        """
-
-        # Cloud button style (blue accent)
-        cloud_style = f"""
-            QPushButton {{
-                background: {CLOUD_ACCENT};
-                color: {DEEP_NAVY};
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: 600;
-                min-height: 20px;
-            }}
-            QPushButton:hover {{
-                background: #93C5FD;
-            }}
-            QPushButton:pressed {{
-                background: #3B82F6;
-            }}
-        """
-
-        # Secondary button style (subtle, no harsh border)
-        secondary_style = f"""
-            QPushButton {{
-                background: rgba(35, 57, 91, 0.6);
-                color: {LIGHT_GRAY};
-                border: 1px solid rgba(169, 169, 169, 0.3);
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
-                min-height: 20px;
-            }}
-            QPushButton:hover {{
-                background: rgba(35, 57, 91, 0.9);
-                border-color: rgba(169, 169, 169, 0.5);
-            }}
-            QPushButton:pressed {{
-                background: rgba(26, 45, 69, 0.9);
-            }}
-        """
-
-        # Tertiary button style (text-like)
-        tertiary_style = f"""
-            QPushButton {{
-                background: transparent;
-                color: {MID_GRAY};
-                border: none;
-                border-radius: 8px;
-                padding: 8px 20px;
-                font-size: 13px;
-                min-height: 18px;
-            }}
-            QPushButton:hover {{
-                background: rgba(35, 57, 91, 0.4);
-                color: {LIGHT_GRAY};
-            }}
-            QPushButton:pressed {{
-                background: rgba(35, 57, 91, 0.6);
-            }}
-        """
+        if self._mode == "startup":
+            # Startup: hardcoded dark theme styles
+            primary_style = f"""
+                QPushButton {{
+                    background: {GOLD};
+                    color: {DEEP_NAVY};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    min-height: 20px;
+                }}
+                QPushButton:hover {{
+                    background: #CCAF6A;
+                }}
+                QPushButton:pressed {{
+                    background: #A89048;
+                }}
+            """
+            cloud_style = f"""
+                QPushButton {{
+                    background: {CLOUD_ACCENT};
+                    color: {DEEP_NAVY};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    min-height: 20px;
+                }}
+                QPushButton:hover {{
+                    background: #93C5FD;
+                }}
+                QPushButton:pressed {{
+                    background: #3B82F6;
+                }}
+            """
+            secondary_style = f"""
+                QPushButton {{
+                    background: rgba(35, 57, 91, 0.6);
+                    color: {LIGHT_GRAY};
+                    border: 1px solid rgba(169, 169, 169, 0.3);
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    min-height: 20px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(35, 57, 91, 0.9);
+                    border-color: rgba(169, 169, 169, 0.5);
+                }}
+                QPushButton:pressed {{
+                    background: rgba(26, 45, 69, 0.9);
+                }}
+            """
+            tertiary_style = f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {MID_GRAY};
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 20px;
+                    font-size: 13px;
+                    min-height: 18px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(35, 57, 91, 0.4);
+                    color: {LIGHT_GRAY};
+                }}
+                QPushButton:pressed {{
+                    background: rgba(35, 57, 91, 0.6);
+                }}
+            """
+        else:
+            # New window: theme-neutral styles (inherit from app QSS)
+            primary_style = """
+                QPushButton {
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    min-height: 20px;
+                }
+            """
+            cloud_style = primary_style
+            secondary_style = """
+                QPushButton {
+                    border: 1px solid palette(mid);
+                    border-radius: 8px;
+                    padding: 10px 20px;
+                    font-size: 14px;
+                    min-height: 20px;
+                }
+                QPushButton:hover {
+                    border-color: palette(light);
+                }
+            """
+            tertiary_style = """
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 20px;
+                    font-size: 13px;
+                    min-height: 18px;
+                }
+            """
 
         has_primary = False
 
@@ -409,7 +503,10 @@ class FileChooserDialog(QDialog):
 
             # Add separator label
             separator = QLabel("or open a local file")
-            separator.setStyleSheet(f"font-size: 11px; color: {DARK_GRAY}; margin-top: 8px;")
+            if self._mode == "startup":
+                separator.setStyleSheet(f"font-size: 11px; color: {DARK_GRAY}; margin-top: 8px;")
+            else:
+                separator.setStyleSheet("font-size: 11px; margin-top: 8px;")
             separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
             btn_layout.addWidget(separator)
 
@@ -452,23 +549,34 @@ class FileChooserDialog(QDialog):
 
         layout.addStretch(2)
 
-        # Quit link
-        quit_btn = QPushButton("Quit")
-        quit_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {DARK_GRAY};
-                border: none;
-                padding: 6px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                color: {MID_GRAY};
-            }}
-        """)
-        quit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        quit_btn.clicked.connect(self.reject)
-        layout.addWidget(quit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        # Bottom button
+        bottom_label = "Quit" if self._mode == "startup" else "Cancel"
+        bottom_btn = QPushButton(bottom_label)
+        if self._mode == "startup":
+            bottom_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {DARK_GRAY};
+                    border: none;
+                    padding: 6px;
+                    font-size: 12px;
+                }}
+                QPushButton:hover {{
+                    color: {MID_GRAY};
+                }}
+            """)
+        else:
+            bottom_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                    padding: 6px;
+                    font-size: 12px;
+                }
+            """)
+        bottom_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        bottom_btn.clicked.connect(self.reject)
+        layout.addWidget(bottom_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
     def _connect_to_server(self, server: "CloudServerConfig") -> None:
         """Connect to a cloud server."""
@@ -482,6 +590,7 @@ class FileChooserDialog(QDialog):
             servers=self._cloud_servers,
             active_server_id=self._active_server_id,
             parent=self,
+            mode=self._mode,
         )
         if dialog.exec():
             if dialog.selected_server:

@@ -869,6 +869,7 @@ class MainWindow(QMainWindow):
             cloud_servers=cloud_servers,
             active_server_id=active_server_id,
             parent=self,
+            mode="new_window",
         )
 
         if chooser.exec():

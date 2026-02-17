@@ -54,7 +54,7 @@ class SetupWizard(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Welcome to Fidra")
         self.setModal(True)
-        self.setFixedSize(520, 480)
+        self.setFixedSize(520, 580)
 
         # Apply base styling
         self.setStyleSheet(f"""
@@ -210,19 +210,24 @@ class SetupWizard(QDialog):
             }}
         """)
         new_layout = QVBoxLayout(new_card)
-        new_layout.setContentsMargins(16, 14, 16, 14)
+        new_layout.setContentsMargins(16, 14, 16, 16)
         new_layout.setSpacing(6)
 
         new_title = QLabel("Create New Database")
+        new_title.setAlignment(Qt.AlignCenter)
         new_title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {LIGHT_GRAY}; background: transparent; border: none;")
         new_layout.addWidget(new_title)
 
         new_desc = QLabel("Start fresh with a new financial ledger")
+        new_desc.setAlignment(Qt.AlignCenter)
         new_desc.setStyleSheet(f"font-size: 12px; color: {MID_GRAY}; background: transparent; border: none;")
         new_layout.addWidget(new_desc)
 
+        new_layout.addSpacing(4)
+
         new_btn = QPushButton("Create New")
-        new_btn.setMinimumHeight(32)
+        new_btn.setFixedWidth(200)
+        new_btn.setMinimumHeight(34)
         new_btn.setCursor(Qt.PointingHandCursor)
         new_btn.setStyleSheet(f"""
             QPushButton {{
@@ -239,7 +244,7 @@ class SetupWizard(QDialog):
             }}
         """)
         new_btn.clicked.connect(self._create_new_database)
-        new_layout.addWidget(new_btn, alignment=Qt.AlignLeft)
+        new_layout.addWidget(new_btn, alignment=Qt.AlignCenter)
 
         layout.addWidget(new_card)
 
@@ -255,19 +260,24 @@ class SetupWizard(QDialog):
             }}
         """)
         open_layout = QVBoxLayout(open_card)
-        open_layout.setContentsMargins(16, 14, 16, 14)
+        open_layout.setContentsMargins(16, 14, 16, 16)
         open_layout.setSpacing(6)
 
         open_title = QLabel("Open Existing Database")
+        open_title.setAlignment(Qt.AlignCenter)
         open_title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {LIGHT_GRAY}; background: transparent; border: none;")
         open_layout.addWidget(open_title)
 
         open_desc = QLabel("Continue with an existing Fidra database file")
+        open_desc.setAlignment(Qt.AlignCenter)
         open_desc.setStyleSheet(f"font-size: 12px; color: {MID_GRAY}; background: transparent; border: none;")
         open_layout.addWidget(open_desc)
 
+        open_layout.addSpacing(4)
+
         open_btn = QPushButton("Browse...")
-        open_btn.setMinimumHeight(32)
+        open_btn.setFixedWidth(200)
+        open_btn.setMinimumHeight(34)
         open_btn.setCursor(Qt.PointingHandCursor)
         open_btn.setStyleSheet(f"""
             QPushButton {{
@@ -285,7 +295,7 @@ class SetupWizard(QDialog):
             }}
         """)
         open_btn.clicked.connect(self._open_existing_database)
-        open_layout.addWidget(open_btn, alignment=Qt.AlignLeft)
+        open_layout.addWidget(open_btn, alignment=Qt.AlignCenter)
 
         layout.addWidget(open_card)
 
@@ -301,19 +311,24 @@ class SetupWizard(QDialog):
             }}
         """)
         cloud_layout = QVBoxLayout(cloud_card)
-        cloud_layout.setContentsMargins(16, 14, 16, 14)
+        cloud_layout.setContentsMargins(16, 14, 16, 16)
         cloud_layout.setSpacing(6)
 
         cloud_title = QLabel("Connect to Cloud Server")
+        cloud_title.setAlignment(Qt.AlignCenter)
         cloud_title.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {LIGHT_GRAY}; background: transparent; border: none;")
         cloud_layout.addWidget(cloud_title)
 
         cloud_desc = QLabel("Connect to a shared cloud database (Supabase)")
+        cloud_desc.setAlignment(Qt.AlignCenter)
         cloud_desc.setStyleSheet(f"font-size: 12px; color: {MID_GRAY}; background: transparent; border: none;")
         cloud_layout.addWidget(cloud_desc)
 
+        cloud_layout.addSpacing(4)
+
         cloud_btn = QPushButton("Configure Server...")
-        cloud_btn.setMinimumHeight(32)
+        cloud_btn.setFixedWidth(200)
+        cloud_btn.setMinimumHeight(34)
         cloud_btn.setCursor(Qt.PointingHandCursor)
         cloud_btn.setStyleSheet(f"""
             QPushButton {{
@@ -330,7 +345,7 @@ class SetupWizard(QDialog):
             }}
         """)
         cloud_btn.clicked.connect(self._configure_cloud_server)
-        cloud_layout.addWidget(cloud_btn, alignment=Qt.AlignLeft)
+        cloud_layout.addWidget(cloud_btn, alignment=Qt.AlignCenter)
 
         layout.addWidget(cloud_card)
 
@@ -585,9 +600,9 @@ class SetupWizard(QDialog):
         """Show dialog to configure a cloud server."""
         from fidra.ui.dialogs.cloud_server_dialog import CloudServerDialog
 
-        dialog = CloudServerDialog(parent=self)
+        dialog = CloudServerDialog(parent=self, wizard_theme=True)
         if dialog.exec():
-            self._cloud_server = dialog.get_server_config()
+            self._cloud_server = dialog.server_config
             self._db_path = None  # Clear any local path
             self.db_path_label.setText(f"Cloud: {self._cloud_server.name}")
             self.db_path_label.show()
