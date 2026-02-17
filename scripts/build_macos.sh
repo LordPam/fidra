@@ -76,8 +76,8 @@ if [ "$1" == "--dmg" ]; then
         exit 1
     fi
 
-    # Get version from pyproject.toml
-    VERSION=$(grep 'version = ' pyproject.toml | head -1 | cut -d'"' -f2)
+    # Get version from fidra/__init__.py (single source of truth)
+    VERSION=$(python -c "from fidra import __version__; print(__version__)")
     DMG_NAME="Fidra-${VERSION}-macOS.dmg"
 
     # Remove old DMG if exists

@@ -482,6 +482,12 @@ class MainWindow(QMainWindow):
         audit_action = menu.addAction("Audit Log...")
         audit_action.triggered.connect(self._show_audit_log)
 
+        menu.addSeparator()
+
+        # About
+        about_action = menu.addAction("About Fidra...")
+        about_action.triggered.connect(self._show_about)
+
         # Show menu below the settings button
         menu.exec(self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft()))
 
@@ -543,6 +549,12 @@ class MainWindow(QMainWindow):
     def _show_audit_log(self) -> None:
         """Show the audit log viewer dialog."""
         dialog = AuditLogDialog(self._ctx, self)
+        dialog.exec()
+
+    def _show_about(self) -> None:
+        """Show the About Fidra dialog."""
+        from fidra.ui.dialogs.about_dialog import AboutDialog
+        dialog = AboutDialog(self)
         dialog.exec()
 
     @qasync.asyncSlot()

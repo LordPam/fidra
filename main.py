@@ -6,15 +6,75 @@ and launches the main window.
 """
 
 import asyncio
+import logging
+import logging.handlers
 import os
 import sys
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import qasync
 from PySide6.QtCore import QTimer, Slot
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+logger = logging.getLogger(__name__)
+
+# Log directory and file path
+LOG_DIR = Path.home() / ".fidra" / "logs"
+LOG_FILE = LOG_DIR / "fidra.log"
+
+
+def _setup_logging() -> None:
+    """Configure logging with rotating file handler and stderr output."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    # Rotating file handler: 1MB max, keep 3 backups
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8",
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root.addHandler(file_handler)
+
+    # Stderr handler for dev runs
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(logging.Formatter(
+        "%(levelname)s %(name)s: %(message)s",
+    ))
+    root.addHandler(stderr_handler)
+
+
+def _global_exception_handler(exc_type, exc_value, exc_tb) -> None:
+    """Handle uncaught exceptions: log and show a friendly dialog."""
+    # Don't intercept KeyboardInterrupt
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+
+    tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    logger.critical("Unhandled exception:\n%s", tb_text)
+
+    # Show dialog if QApplication exists
+    app = QApplication.instance()
+    if app:
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle("Unexpected Error")
+        msg.setText("Something went wrong. The error has been logged.")
+        msg.setInformativeText(str(LOG_FILE))
+        msg.setDetailedText(tb_text)
+        msg.exec()
+    else:
+        print(tb_text, file=sys.stderr)
 
 from fidra.app import ApplicationContext
 from fidra.state.persistence import SettingsStore
@@ -87,6 +147,11 @@ def _get_resource_path(relative_path: str) -> Path:
 
 def run() -> None:
     """Run the application with qasync event loop."""
+    # Set up logging and global exception handler
+    _setup_logging()
+    sys.excepthook = _global_exception_handler
+    logger.info("Fidra starting")
+
     # Create Qt application
     app = QApplication(sys.argv)
     app.setApplicationName("Fidra")
@@ -217,7 +282,8 @@ def run() -> None:
         if exception and "Cannot enter into task" in str(exception):
             # Silently ignore qasync re-entrancy - background tasks will retry
             return
-        # For other exceptions, use default handler
+        # Log other async exceptions
+        logger.error("Async exception: %s", context.get("message", ""), exc_info=exception)
         loop.default_exception_handler(context)
 
     loop.set_exception_handler(exception_handler)
