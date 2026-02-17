@@ -548,6 +548,9 @@ class ApplicationContext:
         # Reload all data
         await self._load_initial_data()
 
+        # Restore UI state from settings
+        self._restore_ui_state()
+
         # Save settings
         self.save_settings()
 
