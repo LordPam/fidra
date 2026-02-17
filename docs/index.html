@@ -6,7 +6,7 @@
     <title>Fidra — Download</title>
     <meta
       name="description"
-      content="Download Fidra for macOS and Windows. A local-first financial ledger for treasurers and individuals."
+      content="Download Fidra for macOS and Windows. A local-first financial ledger with optional cloud sync for treasurers and small teams."
     />
     <meta name="theme-color" content="#1a1d1b" />
     <link rel="icon" href="assets/logo.svg" />
@@ -22,6 +22,7 @@
       <nav class="nav-links">
         <a href="#downloads">Download</a>
         <a href="#features">Features</a>
+        <a href="#cloud">Cloud Sync</a>
         <a href="#faq">FAQ</a>
       </nav>
       <a class="nav-cta" href="#downloads">Get Fidra</a>
@@ -29,11 +30,12 @@
 
     <main>
       <section class="intro">
-        <div class="eyebrow">Desktop Download</div>
+        <div class="eyebrow">Version 2.0</div>
         <h1>Fidra</h1>
         <p>
-          Fidra is a local-first finance ledger for treasurers and small teams.
-          Download the latest macOS or Windows build below.
+          A local-first financial ledger for treasurers and small teams.
+          Track income, expenses, and planned transactions — with optional
+          cloud sync for real-time multi-device access.
         </p>
         <div class="intro-actions">
           <a class="btn primary" href="#downloads">Download</a>
@@ -44,10 +46,10 @@
       <section id="downloads" class="downloads">
         <div class="section-title">
           <h2>Download Fidra</h2>
-          <p>Choose your platform. Builds are signed and packaged with PyInstaller.</p>
+          <p>Choose your platform.</p>
         </div>
         <div class="download-grid">
-          <a class="download-card" data-platform="mac" href="https://github.com/LordPam/fidra/releases/download/v1.0.0/Fidra-1.0.0-mac.dmg">
+          <a class="download-card" data-platform="mac" href="https://github.com/LordPam/fidra/releases/latest">
             <div class="download-icon" aria-hidden="true">
               <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M31.4 4.5c-2 .1-4.3 1.4-5.6 3-1.2 1.4-2.1 3.4-1.7 5.3 2.2.2 4.4-1.1 5.8-2.8 1.3-1.5 2.2-3.5 1.5-5.5Z" fill="currentColor" />
@@ -60,7 +62,7 @@
               <span class="download-cta">Download .dmg</span>
             </div>
           </a>
-          <a class="download-card" data-platform="windows" href="https://github.com/LordPam/fidra/releases/download/v1.0.0/Fidra-1.0.0-win.exe">
+          <a class="download-card" data-platform="windows" href="https://github.com/LordPam/fidra/releases/latest">
             <div class="download-icon" aria-hidden="true">
               <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M6 10.5 21.5 8v14H6v-11.5Zm17.5-2.8 18.5-2.7V22H23.5V7.7Zm-17.5 25 15.5 2.3V24H6v8.7Zm17.5 2.6 18.5 2.7V24H23.5v13.3Z" fill="currentColor" />
@@ -68,13 +70,10 @@
             </div>
             <div class="download-info">
               <h3>Windows</h3>
-              <p>Windows 10/11 signed installer.</p>
+              <p>Windows 10/11 installer.</p>
               <span class="download-cta">Download .exe</span>
             </div>
           </a>
-        </div>
-        <div class="download-note">
-          Replace the download URLs in <code>docs/index.html</code> when your builds are ready.
         </div>
       </section>
 
@@ -86,20 +85,60 @@
         <div class="feature-grid">
           <div class="feature-card">
             <h3>Local-first ledger</h3>
-            <p>Keep your data on your machine with fast, offline workflows.</p>
+            <p>Keep your data on your machine with fast, offline-first workflows. Works fully without an internet connection.</p>
           </div>
           <div class="feature-card">
-            <h3>Search & filter</h3>
-            <p>Find any transaction instantly with advanced filters.</p>
+            <h3>Cloud sync</h3>
+            <p>Optionally connect to a PostgreSQL backend for real-time multi-device access with offline-first caching.</p>
           </div>
           <div class="feature-card">
-            <h3>Reports & exports</h3>
-            <p>Generate PDF and CSV reports in a few clicks.</p>
+            <h3>Search &amp; filter</h3>
+            <p>Find any transaction instantly with boolean query search across all fields.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Reports &amp; exports</h3>
+            <p>Generate PDF, CSV, and Markdown reports with customisable templates.</p>
           </div>
           <div class="feature-card">
             <h3>Planned transactions</h3>
-            <p>Track recurring entries and upcoming commitments.</p>
+            <p>Recurring templates with weekly, monthly, quarterly, and yearly frequencies.</p>
           </div>
+          <div class="feature-card">
+            <h3>Approval workflow</h3>
+            <p>Pending, approved, and rejected statuses for expense oversight and accountability.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Attachments</h3>
+            <p>Attach receipts and documents to transactions. Cloud-hosted via Supabase Storage when syncing.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Dashboard</h3>
+            <p>Balance overview, income vs expense charts, and upcoming transaction summaries at a glance.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="cloud" class="cloud">
+        <div class="section-title">
+          <h2>Cloud Sync</h2>
+          <p>Connect Fidra to a Supabase-hosted PostgreSQL database for multi-device, multi-user access.</p>
+        </div>
+        <div class="cloud-grid">
+          <div class="feature-card">
+            <h3>Offline-first</h3>
+            <p>All data is cached locally. Reads are instant, even without a connection. Changes queue up and sync automatically when back online.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Real-time updates</h3>
+            <p>Changes from other devices arrive within seconds via PostgreSQL LISTEN/NOTIFY. No polling, no manual refresh.</p>
+          </div>
+          <div class="feature-card">
+            <h3>Auto-recovery</h3>
+            <p>If the network drops, Fidra reconnects automatically with health checks every 5 seconds. No restart needed.</p>
+          </div>
+        </div>
+        <div class="cloud-cta">
+          <a class="btn ghost" href="cloud-setup-guide.html">Cloud Setup Guide</a>
         </div>
       </section>
 
@@ -120,25 +159,34 @@
         <div class="faq-grid">
           <details>
             <summary>Is Fidra free?</summary>
-            <p>Yes. Fidra is open-source and free to use.</p>
+            <p>Fidra is free to use for individuals and organisations.</p>
           </details>
           <details>
             <summary>Does it require an internet connection?</summary>
-            <p>No. Fidra runs locally and works fully offline.</p>
+            <p>No. Fidra works fully offline with a local SQLite database. Cloud sync is optional and the app continues to work seamlessly when the network is unavailable.</p>
           </details>
           <details>
             <summary>Where is my data stored?</summary>
-            <p>Your ledger stays on your device unless you export it.</p>
+            <p>By default, your ledger is stored locally in a .fdra file on your device. If you enable cloud sync, data is also stored in a PostgreSQL database you control (via Supabase or self-hosted).</p>
+          </details>
+          <details>
+            <summary>Can multiple people use Fidra on the same data?</summary>
+            <p>Yes. When connected to a cloud server, multiple users can work on the same ledger simultaneously. Changes sync in real time across devices.</p>
+          </details>
+          <details>
+            <summary>How do I set up cloud sync?</summary>
+            <p>Follow the <a href="cloud-setup-guide.html" style="color: var(--gold);">Cloud Setup Guide</a> to configure a Supabase project and connect Fidra to it.</p>
           </details>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <div>© 2026 Fidra</div>
+      <div>&copy; 2026 Fidra</div>
       <div class="footer-links">
-        <a href="https://github.com/" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/LordPam/fidra" rel="noreferrer">GitHub</a>
         <a href="#downloads">Download</a>
+        <a href="cloud-setup-guide.html">Cloud Setup</a>
       </div>
     </footer>
 

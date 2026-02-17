@@ -343,6 +343,192 @@ main {
   margin: 10px 0 0;
 }
 
+/* Cloud sync section */
+.cloud {
+  padding-bottom: 40px;
+}
+
+.cloud-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  padding: 0 8vw;
+}
+
+.cloud-cta {
+  padding: 24px 8vw 0;
+}
+
+/* Guide page (cloud-setup-guide.html) */
+.guide {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 8vw 60px;
+}
+
+.guide-header {
+  margin-bottom: 32px;
+}
+
+.guide-back {
+  display: inline-block;
+  color: var(--gold);
+  font-size: 0.9rem;
+  margin-bottom: 16px;
+}
+
+.guide-back:hover {
+  text-decoration: underline;
+}
+
+.guide-header h1 {
+  font-size: clamp(2rem, 3vw, 2.6rem);
+  margin: 0 0 12px;
+}
+
+.guide-subtitle {
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.guide-overview {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 28px;
+}
+
+.guide-overview ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.guide-overview li {
+  margin-bottom: 6px;
+}
+
+.guide-toc {
+  background: var(--card-strong);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin-bottom: 36px;
+}
+
+.guide-toc h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.guide-toc ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.guide-toc li {
+  margin-bottom: 4px;
+}
+
+.guide-toc a {
+  color: var(--gold);
+}
+
+.guide-toc a:hover {
+  text-decoration: underline;
+}
+
+.guide-section {
+  margin-bottom: 36px;
+  padding-bottom: 36px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.guide-section:last-of-type {
+  border-bottom: none;
+}
+
+.guide-section h2 {
+  font-size: 1.5rem;
+  margin: 0 0 16px;
+}
+
+.guide-section h3 {
+  font-size: 1.15rem;
+  margin: 20px 0 10px;
+}
+
+.guide-section h4 {
+  font-size: 1rem;
+  margin: 16px 0 8px;
+  color: var(--gold);
+}
+
+.guide-section p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.guide-section ol,
+.guide-section ul {
+  color: var(--muted);
+  padding-left: 22px;
+  line-height: 1.7;
+}
+
+.guide-section li {
+  margin-bottom: 4px;
+}
+
+.guide-section pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  padding: 16px 18px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+
+.guide-section code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.88em;
+}
+
+.guide-section p code,
+.guide-section li code {
+  background: var(--card);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.guide-link {
+  color: var(--gold);
+}
+
+.guide-link:hover {
+  text-decoration: underline;
+}
+
+.guide-note {
+  background: rgba(191, 161, 89, 0.1);
+  border: 1px solid rgba(191, 161, 89, 0.3);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin: 14px 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.guide-footer {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--stroke);
+}
+
 .footer {
   border-top: 1px solid var(--stroke);
   padding: 24px 8vw 40px;
