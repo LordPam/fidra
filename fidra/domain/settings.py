@@ -179,7 +179,7 @@ class SyncSettings(BaseModel):
     """
 
     conflict_strategy: str = Field(
-        default="last_write_wins",
+        default="ask_user",
         pattern="^(last_write_wins|server_wins|client_wins|ask_user)$"
     )
     health_check_interval_seconds: int = Field(default=30, ge=5, le=300)

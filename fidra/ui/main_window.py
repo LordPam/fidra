@@ -28,13 +28,16 @@ from PySide6.QtWidgets import (
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
 
-from fidra.domain.models import PlannedTemplate
+from fidra.domain.models import PlannedTemplate, Transaction
 from fidra.ui.theme.engine import get_theme_engine, Theme
 from fidra.ui.views.dashboard_view import DashboardView
 from fidra.ui.views.transactions_view import TransactionsView
 from fidra.ui.views.planned_view import PlannedView
 from fidra.ui.views.activities_view import ActivitiesView
 from fidra.ui.views.reports_view import ReportsView
+from fidra.ui.dialogs.conflict_resolution_dialog import (
+    ConflictResolutionDialog, ConflictResolution,
+)
 from fidra.ui.dialogs.manage_sheets_dialog import ManageSheetsDialog
 from fidra.ui.dialogs.audit_log_dialog import AuditLogDialog
 from fidra.ui.dialogs.backup_restore_dialog import BackupRestoreDialog
@@ -156,6 +159,9 @@ class MainWindow(QMainWindow):
             if self._ctx.sync_service:
                 self._ctx.sync_service.pending_count_changed.connect(
                     self.connection_indicator.set_pending_count
+                )
+                self._ctx.sync_service.conflict_detected.connect(
+                    self._on_sync_conflict_detected
                 )
 
     def _create_top_bar(self) -> QWidget:
@@ -806,6 +812,55 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Database reloaded", 3000)
         except Exception as e:
             self.status_bar.showMessage(f"Error reloading database: {e}", 5000)
+
+    def _on_sync_conflict_detected(self, change_id, local_data, server_entity) -> None:
+        """Handle a sync conflict by showing the resolution dialog.
+
+        Args:
+            change_id: Queue entry ID for the conflicting change
+            local_data: Local version as a dict (from sync queue payload)
+            server_entity: Server version as a domain object
+        """
+        # Currently only handle transaction conflicts with the dialog
+        if not isinstance(server_entity, Transaction):
+            # For non-transaction entities, fall back to server wins
+            asyncio.ensure_future(
+                self._ctx.sync_service.resolve_conflict_with_choice(
+                    change_id, use_local=False,
+                    entity_type=getattr(server_entity, '__class__.__name__', '').lower(),
+                )
+            )
+            return
+
+        # Deserialize local dict into a Transaction for the dialog
+        local_transaction = self._ctx.sync_service._deserialize_transaction(local_data)
+
+        dialog = ConflictResolutionDialog(local_transaction, server_entity, parent=self)
+        result = dialog.exec()
+
+        resolution = dialog.get_resolution()
+        if resolution == ConflictResolution.KEEP_MINE:
+            asyncio.ensure_future(self._resolve_conflict(
+                change_id, use_local=True,
+                entity_type="transaction", entity_id=server_entity.id,
+            ))
+        elif resolution == ConflictResolution.USE_THEIRS:
+            asyncio.ensure_future(self._resolve_conflict(
+                change_id, use_local=False,
+                entity_type="transaction", entity_id=server_entity.id,
+            ))
+        # CANCEL: leave the conflict in the queue for next sync cycle
+
+    async def _resolve_conflict(
+        self, change_id, use_local: bool, entity_type: str, entity_id
+    ) -> None:
+        """Resolve a sync conflict and reload data."""
+        await self._ctx.sync_service.resolve_conflict_with_choice(
+            change_id, use_local,
+            entity_type=entity_type, entity_id=entity_id,
+        )
+        # Reload data so the UI reflects the resolution
+        await self._ctx._load_initial_data()
 
     @qasync.asyncSlot()
     async def check_opening_balance(self) -> None:

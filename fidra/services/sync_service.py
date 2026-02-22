@@ -469,23 +469,25 @@ class SyncService(QObject):
         return await self._queue.get_pending_count()
 
     async def resolve_conflict_with_choice(
-        self, change_id: UUID, use_local: bool
+        self, change_id: UUID, use_local: bool,
+        entity_type: str = "", entity_id: UUID | None = None,
     ) -> None:
         """Resolve a conflict with user's choice.
 
         Args:
-            change_id: ID of the conflicting change
+            change_id: ID of the conflicting change (queue entry ID)
             use_local: True to use local version, False to use server
+            entity_type: Entity type (e.g. "transaction") for refresh on server-wins
+            entity_id: Entity ID for refresh on server-wins
         """
         await self._queue.resolve_conflict(change_id, use_local)
         if use_local:
             # Trigger sync to push local version
             await self.sync_now()
         else:
-            # Refresh from cloud
-            change = await self._queue.get_pending_for_entity(change_id)
-            if change:
-                await self._refresh_entity(change.entity_type, change.entity_id)
+            # Refresh from cloud to get server version into local cache
+            if entity_type:
+                await self._refresh_entity(entity_type, entity_id)
 
     # Deserialization helpers
 
