@@ -288,6 +288,7 @@ class TransactionsView(QWidget):
         self.transaction_table.convert_to_actual_requested.connect(self._on_convert_to_actual_requested)
         self.transaction_table.skip_instance_requested.connect(self._on_skip_instance_requested)
         self.transaction_table.delete_template_requested.connect(self._on_delete_template_requested)
+        self.transaction_table.edit_template_requested.connect(self._edit_planned_template)
 
         # Table selection changes
         self.transaction_table.selectionModel().selectionChanged.connect(self._on_selection_changed)

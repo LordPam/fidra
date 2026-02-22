@@ -51,6 +51,7 @@ class TransactionTable(QTableView):
     convert_to_actual_requested = Signal(list)  # User wants to convert planned to actual
     skip_instance_requested = Signal(list)  # User wants to skip planned instance(s)
     delete_template_requested = Signal(list)  # User wants to delete planned template(s)
+    edit_template_requested = Signal(Transaction)  # User wants to edit planned template
 
     def __init__(self, parent=None):
         """Initialize the transaction table.
@@ -201,9 +202,13 @@ class TransactionTable(QTableView):
         Args:
             index: Model index that was double-clicked
         """
+        from fidra.domain.models import ApprovalStatus
         trans = self._model.get_transaction_at(index.row())
         if trans:
-            self.edit_requested.emit(trans)
+            if trans.status == ApprovalStatus.PLANNED:
+                self.edit_template_requested.emit(trans)
+            else:
+                self.edit_requested.emit(trans)
 
     def _show_context_menu(self, position) -> None:
         """Show context menu at the given position.
@@ -223,6 +228,12 @@ class TransactionTable(QTableView):
 
         # If ALL selected are planned, show planned-specific actions
         if planned_only and len(planned_only) == len(selected):
+            # Edit Template (single planned only)
+            if len(planned_only) == 1:
+                edit_tmpl_action = QAction("Edit Template", self)
+                edit_tmpl_action.triggered.connect(lambda: self.edit_template_requested.emit(planned_only[0]))
+                menu.addAction(edit_tmpl_action)
+
             # Convert to Actual
             convert_action = QAction(f"Convert to Actual ({len(planned_only)})", self)
             convert_action.triggered.connect(lambda: self.convert_to_actual_requested.emit(planned_only))

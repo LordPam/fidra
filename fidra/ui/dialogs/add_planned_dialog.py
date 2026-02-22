@@ -189,21 +189,16 @@ class AddPlannedDialog(QDialog):
             self.sheet_combo.setVisible(False)
 
         # ===== END CONDITIONS (for recurring) =====
-        end_frame = QFrame()
-        end_frame.setObjectName("secondary_frame")
-        end_layout = QVBoxLayout(end_frame)
-        end_layout.setContentsMargins(8, 8, 8, 8)
-        end_layout.setSpacing(6)
+        self.end_frame = QFrame()
+        self.end_frame.setObjectName("secondary_frame")
+        end_layout = QHBoxLayout(self.end_frame)
+        end_layout.setContentsMargins(10, 8, 10, 8)
+        end_layout.setSpacing(12)
 
-        end_label = QLabel("End Condition (for recurring)")
-        end_label.setObjectName("secondary_text")
-        end_layout.addWidget(end_label)
-
-        # End date row
-        end_date_row = QHBoxLayout()
-        self.end_date_check = QCheckBox("End Date:")
+        # End date option
+        self.end_date_check = QCheckBox("End date")
         self.end_date_check.stateChanged.connect(self._on_end_date_checked)
-        end_date_row.addWidget(self.end_date_check)
+        end_layout.addWidget(self.end_date_check)
 
         self.end_date_edit = QDateEdit()
         self.end_date_edit.setCalendarPopup(True)
@@ -211,28 +206,36 @@ class AddPlannedDialog(QDialog):
         self.end_date_edit.setDate(QDate.currentDate().addMonths(3))
         self.end_date_edit.setEnabled(False)
         self.end_date_edit.setMinimumHeight(28)
-        end_date_row.addWidget(self.end_date_edit, 1)
-        end_layout.addLayout(end_date_row)
+        end_layout.addWidget(self.end_date_edit)
 
-        # Occurrence count row
-        occurrence_row = QHBoxLayout()
-        self.occurrence_check = QCheckBox("After:")
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setObjectName("toolbar_separator")
+        sep.setFixedHeight(20)
+        end_layout.addWidget(sep)
+
+        # Occurrence count option
+        self.occurrence_check = QCheckBox("After")
         self.occurrence_check.stateChanged.connect(self._on_occurrence_checked)
-        occurrence_row.addWidget(self.occurrence_check)
+        end_layout.addWidget(self.occurrence_check)
 
         self.occurrence_spin = QSpinBox()
         self.occurrence_spin.setRange(1, 1000)
         self.occurrence_spin.setValue(12)
         self.occurrence_spin.setEnabled(False)
         self.occurrence_spin.setMinimumHeight(28)
-        occurrence_row.addWidget(self.occurrence_spin)
+        self.occurrence_spin.setFixedWidth(70)
+        end_layout.addWidget(self.occurrence_spin)
 
-        occurrence_row.addWidget(QLabel("occurrences"))
-        occurrence_row.addStretch()
-        end_layout.addLayout(occurrence_row)
+        self.occurrence_label = QLabel("occurrences")
+        end_layout.addWidget(self.occurrence_label)
+        end_layout.addStretch()
 
-        self.end_frame = end_frame
-        layout.addWidget(end_frame)
+        layout.addWidget(self.end_frame)
+
+        # Hide end conditions initially (default frequency is Once)
+        self.end_frame.setVisible(False)
 
         # ===== BUTTONS =====
         button_box = QDialogButtonBox(
@@ -360,11 +363,9 @@ class AddPlannedDialog(QDialog):
                 self.category_input.setCurrentText(current_text)
 
     def _on_frequency_changed(self, index: int) -> None:
-        """Handle frequency change - enable/disable end conditions."""
+        """Handle frequency change - hide end conditions for one-time."""
         is_once = index == 0
-        self.end_frame.setEnabled(not is_once)
-        self.end_date_check.setEnabled(not is_once)
-        self.occurrence_check.setEnabled(not is_once)
+        self.end_frame.setVisible(not is_once)
 
         if is_once:
             self.end_date_check.setChecked(False)
