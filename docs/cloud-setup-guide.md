@@ -50,6 +50,7 @@ CREATE TABLE transactions (
     party TEXT,
     notes TEXT,
     reference TEXT,
+    activity TEXT,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     modified_at TIMESTAMPTZ,
@@ -72,6 +73,7 @@ CREATE TABLE planned_templates (
     target_sheet TEXT NOT NULL,
     category TEXT,
     party TEXT,
+    activity TEXT,
     end_date DATE,
     occurrence_count INTEGER,
     skipped_dates JSONB DEFAULT '[]'::jsonb,
@@ -306,6 +308,25 @@ The triggers are installed automatically on first connection (idempotent, safe t
 - Once offline, recovery checks run every 5 seconds
 - When network returns, the app reconnects automatically (no restart needed)
 - The status bar indicator shows current connection state (green/yellow/red) with a manual Reconnect button
+
+---
+
+## Upgrading an Existing Database
+
+If you set up your Supabase database before the `reference` and `activity` columns were added, you need to add them manually. Open the **SQL Editor** in your Supabase dashboard and run:
+
+```sql
+-- Add reference column (for bank statement matching)
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reference TEXT;
+
+-- Add activity column (for project/activity tagging)
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS activity TEXT;
+
+-- Add activity column to planned templates
+ALTER TABLE planned_templates ADD COLUMN IF NOT EXISTS activity TEXT;
+```
+
+These columns are optional (`TEXT`, nullable) so existing data is unaffected.
 
 ---
 
