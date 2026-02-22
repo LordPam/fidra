@@ -105,6 +105,13 @@ class SettingsStore:
             storage.pop("supabase", None)
 
         data["storage"] = storage
+
+        # Migrate conflict strategy: last_write_wins → ask_user
+        sync = data.get("sync", {})
+        if sync.get("conflict_strategy") == "last_write_wins":
+            sync["conflict_strategy"] = "ask_user"
+            data["sync"] = sync
+
         return data
 
     def save(self, settings: AppSettings) -> None:
