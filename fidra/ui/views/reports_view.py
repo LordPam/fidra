@@ -135,13 +135,13 @@ class ReportsView(QWidget):
 
         filter_layout.addSpacing(20)
 
-        # Sheet filter
-        filter_layout.addWidget(QLabel("Sheet:"))
-        self.sheet_combo = QComboBox()
-        self.sheet_combo.setMinimumWidth(120)
-        self._populate_sheets()
-        self.sheet_combo.currentIndexChanged.connect(self._apply_filters)
-        filter_layout.addWidget(self.sheet_combo)
+        # Activity filter
+        filter_layout.addWidget(QLabel("Activity:"))
+        self.activity_combo = QComboBox()
+        self.activity_combo.setMinimumWidth(120)
+        self._populate_activities()
+        self.activity_combo.currentIndexChanged.connect(self._apply_filters)
+        filter_layout.addWidget(self.activity_combo)
 
         filter_layout.addStretch()
 
@@ -288,38 +288,27 @@ class ReportsView(QWidget):
     def _connect_signals(self) -> None:
         """Connect signals to slots."""
         self._context.state.transactions.changed.connect(self._on_transactions_changed)
-        self._context.state.sheets.changed.connect(self._on_sheets_changed)
 
-    def _populate_sheets(self) -> None:
-        """Populate sheet combo box."""
-        self.sheet_combo.clear()
-        self.sheet_combo.addItem("All Sheets", None)
-        for sheet_name in self._get_ordered_sheet_names():
-            self.sheet_combo.addItem(sheet_name, sheet_name)
-
-    def _get_ordered_sheet_names(self) -> list[str]:
-        """Get real sheet names in saved dropdown order."""
-        sheets = [
-            s for s in self._context.state.sheets.value
-            if not s.is_virtual and not s.is_planned
-        ]
-
-        saved_order = self._context.settings.sheet_order
-        order_map = {name: idx for idx, name in enumerate(saved_order)}
-        sheets.sort(key=lambda s: (order_map.get(s.name, len(order_map)), s.name.lower()))
-        return [s.name for s in sheets]
+    def _populate_activities(self) -> None:
+        """Populate activity combo box from transaction data."""
+        self.activity_combo.clear()
+        self.activity_combo.addItem("All", None)
+        activities = sorted(
+            {t.activity.strip() for t in self._context.state.transactions.value
+             if t.activity and t.activity.strip()},
+            key=str.lower,
+        )
+        for name in activities:
+            self.activity_combo.addItem(name, name)
 
     def _on_transactions_changed(self, transactions: list[Transaction]) -> None:
         """Handle transactions list change."""
-        self._apply_filters()
-
-    def _on_sheets_changed(self, sheets: list) -> None:
-        """Handle sheets list change."""
-        current = self.sheet_combo.currentData()
-        self._populate_sheets()
-        index = self.sheet_combo.findData(current)
+        current = self.activity_combo.currentData()
+        self._populate_activities()
+        index = self.activity_combo.findData(current)
         if index >= 0:
-            self.sheet_combo.setCurrentIndex(index)
+            self.activity_combo.setCurrentIndex(index)
+        self._apply_filters()
 
     def _preset_this_month(self) -> None:
         """Set date range to this month."""
@@ -391,10 +380,13 @@ class ReportsView(QWidget):
             if t.status != ApprovalStatus.PLANNED
         ]
 
-        # Apply sheet filter if selected
-        selected_sheet = self.sheet_combo.currentData()
-        if selected_sheet is not None:
-            transactions_for_chart = [t for t in transactions_for_chart if t.sheet == selected_sheet]
+        # Apply activity filter if selected
+        selected_activity = self.activity_combo.currentData()
+        if selected_activity is not None:
+            transactions_for_chart = [
+                t for t in transactions_for_chart
+                if t.activity and t.activity.strip() == selected_activity
+            ]
 
         self.balance_chart.update_data(
             transactions_for_chart,
@@ -448,10 +440,13 @@ class ReportsView(QWidget):
             and t.status != ApprovalStatus.PLANNED
         ]
 
-        # Apply sheet filter
-        selected_sheet = self.sheet_combo.currentData()
-        if selected_sheet is not None:
-            filtered = [t for t in filtered if t.sheet == selected_sheet]
+        # Apply activity filter
+        selected_activity = self.activity_combo.currentData()
+        if selected_activity is not None:
+            filtered = [
+                t for t in filtered
+                if t.activity and t.activity.strip() == selected_activity
+            ]
 
         self._filtered_transactions = filtered
 

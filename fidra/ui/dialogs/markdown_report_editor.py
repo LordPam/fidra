@@ -41,7 +41,7 @@ DEFAULT_TEMPLATE = """# {{title}}
 
 **Generated**: {{date}}
 **Period**: {{period}}
-**Sheet**: {{sheet}}
+**Activity**: {{activity}}
 
 ---
 
@@ -98,7 +98,8 @@ class MarkdownReportEditor(QDialog):
         "{{title}}": "Report title",
         "{{date}}": "Generation date (YYYY-MM-DD)",
         "{{period}}": "Date range (e.g., '2024-01-01 to 2024-01-31')",
-        "{{sheet}}": "Selected sheet name (or 'All Sheets')",
+        "{{activity}}": "Selected activity name (or 'All Activities')",
+        "{{sheet}}": "Selected activity (alias for {{activity}})",
 
         # Summary values
         "{{total_income}}": "Total income for period",
@@ -174,12 +175,17 @@ class MarkdownReportEditor(QDialog):
         self.end_date.setDate(date.today())
         header_layout.addWidget(self.end_date)
 
-        header_layout.addWidget(QLabel("Sheet:"))
-        self.sheet_combo = QComboBox()
-        self.sheet_combo.addItem("All Sheets", None)
-        for sheet_name in self._get_ordered_sheet_names():
-            self.sheet_combo.addItem(sheet_name, sheet_name)
-        header_layout.addWidget(self.sheet_combo)
+        header_layout.addWidget(QLabel("Activity:"))
+        self.activity_combo = QComboBox()
+        self.activity_combo.addItem("All", None)
+        activities = sorted(
+            {t.activity.strip() for t in self._transactions
+             if t.activity and t.activity.strip()},
+            key=str.lower,
+        )
+        for name in activities:
+            self.activity_combo.addItem(name, name)
+        header_layout.addWidget(self.activity_combo)
 
         all_btn = QPushButton("All")
         all_btn.setObjectName("link_button")
@@ -374,39 +380,27 @@ class MarkdownReportEditor(QDialog):
                 QMessageBox.critical(self, "Error", f"Failed to save template: {e}")
 
     def _get_filtered_transactions(self) -> list[Transaction]:
-        """Get transactions filtered by date range.
+        """Get transactions filtered by date range and activity.
 
         Returns:
             Filtered transaction list
         """
         start = self.start_date.date().toPython()
         end = self.end_date.date().toPython()
-        selected_sheet = self.sheet_combo.currentData()
+        selected_activity = self.activity_combo.currentData()
 
         return [
             t for t in self._transactions
             if start <= t.date <= end
-            and (selected_sheet is None or t.sheet == selected_sheet)
+            and (selected_activity is None or (t.activity and t.activity.strip() == selected_activity))
         ]
-
-    def _get_ordered_sheet_names(self) -> list[str]:
-        """Get real sheet names in saved dropdown order."""
-        sheets = [
-            s for s in self._context.state.sheets.value
-            if not s.is_virtual and not s.is_planned
-        ]
-
-        saved_order = self._context.settings.sheet_order
-        order_map = {name: idx for idx, name in enumerate(saved_order)}
-        sheets.sort(key=lambda s: (order_map.get(s.name, len(order_map)), s.name.lower()))
-        return [s.name for s in sheets]
 
     def _preset_all_start(self) -> None:
-        """Set start date to earliest available transaction in current sheet selection."""
-        selected_sheet = self.sheet_combo.currentData()
+        """Set start date to earliest available transaction in current activity selection."""
+        selected_activity = self.activity_combo.currentData()
         candidates = [
             t for t in self._transactions
-            if selected_sheet is None or t.sheet == selected_sheet
+            if selected_activity is None or (t.activity and t.activity.strip() == selected_activity)
         ]
         if not candidates:
             return
@@ -426,8 +420,8 @@ class MarkdownReportEditor(QDialog):
         transactions = self._get_filtered_transactions()
         start = self.start_date.date().toPython()
         end = self.end_date.date().toPython()
-        selected_sheet = self.sheet_combo.currentData()
-        sheet_label = selected_sheet or "All Sheets"
+        selected_activity = self.activity_combo.currentData()
+        activity_label = selected_activity or "All Activities"
 
         # Valid transactions (not planned/rejected)
         valid = [
@@ -447,7 +441,7 @@ class MarkdownReportEditor(QDialog):
         net = total_income - total_expenses
         balance_source = [
             t for t in self._transactions
-            if selected_sheet is None or t.sheet == selected_sheet
+            if selected_activity is None or (t.activity and t.activity.strip() == selected_activity)
         ]
         balance = self._context.balance_service.compute_total(balance_source)
 
@@ -459,7 +453,8 @@ class MarkdownReportEditor(QDialog):
             "{{title}}": "Financial Report",
             "{{date}}": date.today().strftime('%Y-%m-%d'),
             "{{period}}": f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}",
-            "{{sheet}}": sheet_label,
+            "{{sheet}}": activity_label,
+            "{{activity}}": activity_label,
             "{{total_income}}": f"£{total_income:,.2f}",
             "{{total_expenses}}": f"£{total_expenses:,.2f}",
             "{{net}}": f"£{net:,.2f}",
