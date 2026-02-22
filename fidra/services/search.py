@@ -54,6 +54,7 @@ class SearchService:
         "coffee OR fuel"            - Either term must match
         "NOT pending"               - Exclude pending
         "(coffee OR fuel) AND car"  - Grouped conditions
+        '"Social Event"'            - Exact phrase search
     """
 
     def search(self, transactions: list[Transaction], query: str) -> list[Transaction]:
@@ -126,9 +127,22 @@ class SearchService:
                 i += 1
                 continue
 
+            # Quoted phrase - treat entire contents as a single term
+            if query[i] == '"':
+                i += 1  # skip opening quote
+                start = i
+                while i < len(query) and query[i] != '"':
+                    i += 1
+                phrase = query[start:i]
+                if i < len(query):
+                    i += 1  # skip closing quote
+                if phrase:
+                    tokens.append(Token(TokenType.TERM, phrase))
+                continue
+
             # Read word
             start = i
-            while i < len(query) and not query[i].isspace() and query[i] not in '()':
+            while i < len(query) and not query[i].isspace() and query[i] not in '()"':
                 i += 1
 
             word = query[start:i]

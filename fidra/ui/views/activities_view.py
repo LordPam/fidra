@@ -230,4 +230,4 @@ class ActivitiesView(QWidget):
         # Don't navigate for the totals row
         if activity_name == "Total":
             return
-        self.activity_selected.emit(activity_name)
+        self.activity_selected.emit(f'"{activity_name}"')
