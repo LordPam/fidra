@@ -109,6 +109,8 @@ class ConflictResolutionDialog(QDialog):
             ("Status", self._local.status.value.title(), self._db.status.value.title()),
             ("Category", self._local.category or "-", self._db.category or "-"),
             ("Party", self._local.party or "-", self._db.party or "-"),
+            ("Reference", self._local.reference or "-", self._db.reference or "-"),
+            ("Activity", self._local.activity or "-", self._db.activity or "-"),
         ]
 
         for field_name, local_val, db_val in fields:

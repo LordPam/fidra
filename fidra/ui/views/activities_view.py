@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from fidra.domain.models import Transaction, TransactionType
+from fidra.domain.models import Transaction, PlannedTemplate, TransactionType
 
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
@@ -56,9 +56,9 @@ class ActivitiesView(QWidget):
         # Summary table
         self.table = QTableWidget()
         self.table.setObjectName("activities_table")
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
-            ["Activity", "Transactions", "Income", "Expenses", "Net"]
+            ["Activity", "Txns", "Income", "Expenses", "Net", "Planned", "Projected Net"]
         )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -68,7 +68,7 @@ class ActivitiesView(QWidget):
         # Column sizing
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for col in range(1, 5):
+        for col in range(1, 7):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self.table, 1)
@@ -87,21 +87,31 @@ class ActivitiesView(QWidget):
     def _connect_signals(self) -> None:
         """Connect signals to slots."""
         self._context.state.transactions.changed.connect(
-            self._on_transactions_changed
+            self._on_data_changed
+        )
+        self._context.state.planned_templates.changed.connect(
+            self._on_data_changed
         )
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
 
-    def _on_transactions_changed(self, transactions: list[Transaction]) -> None:
-        """Handle transactions list change."""
+    def _on_data_changed(self, *args) -> None:
+        """Handle transactions or planned templates change."""
         self._update_summary()
 
     def _update_summary(self) -> None:
         """Recompute and display the activities summary table."""
         transactions = self._context.state.transactions.value
+        planned_templates = self._context.state.planned_templates.value
 
-        # Group by activity
+        # Group transactions by activity
         activity_data: dict[str, dict] = defaultdict(
-            lambda: {"count": 0, "income": Decimal("0"), "expenses": Decimal("0")}
+            lambda: {
+                "count": 0,
+                "income": Decimal("0"),
+                "expenses": Decimal("0"),
+                "planned_income": Decimal("0"),
+                "planned_expenses": Decimal("0"),
+            }
         )
 
         for t in transactions:
@@ -113,6 +123,16 @@ class ActivitiesView(QWidget):
                 entry["income"] += t.amount
             else:
                 entry["expenses"] += t.amount
+
+        # Add planned template amounts
+        for p in planned_templates:
+            if not p.activity or not p.activity.strip():
+                continue
+            entry = activity_data[p.activity.strip()]
+            if p.type == TransactionType.INCOME:
+                entry["planned_income"] += p.amount
+            else:
+                entry["planned_expenses"] += p.amount
 
         # Sort by activity name
         sorted_activities = sorted(activity_data.items(), key=lambda x: x[0].lower())
@@ -131,22 +151,26 @@ class ActivitiesView(QWidget):
         grand_count = 0
         grand_income = Decimal("0")
         grand_expenses = Decimal("0")
+        grand_planned_net = Decimal("0")
 
         for row, (activity, data) in enumerate(sorted_activities):
             count = data["count"]
             income = data["income"]
             expenses = data["expenses"]
             net = income - expenses
+            planned_net = data["planned_income"] - data["planned_expenses"]
+            projected_net = net + planned_net
 
             grand_count += count
             grand_income += income
             grand_expenses += expenses
+            grand_planned_net += planned_net
 
             # Activity name
             name_item = QTableWidgetItem(activity)
             self.table.setItem(row, 0, name_item)
 
-            # Transaction count (center-aligned)
+            # Transaction count
             count_item = QTableWidgetItem(str(count))
             count_item.setTextAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -171,9 +195,28 @@ class ActivitiesView(QWidget):
             net_item = self._make_net_item(net)
             self.table.setItem(row, 4, net_item)
 
+            # Planned net
+            if planned_net != 0:
+                planned_item = self._make_net_item(planned_net)
+                planned_item.setToolTip(
+                    f"Planned: +\u00a3{data['planned_income']:,.2f} income, "
+                    f"-\u00a3{data['planned_expenses']:,.2f} expenses"
+                )
+            else:
+                planned_item = QTableWidgetItem("-")
+                planned_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+            self.table.setItem(row, 5, planned_item)
+
+            # Projected net (actual + planned)
+            projected_item = self._make_net_item(projected_net)
+            self.table.setItem(row, 6, projected_item)
+
         # Totals row
         totals_row = len(sorted_activities)
         grand_net = grand_income - grand_expenses
+        grand_projected = grand_net + grand_planned_net
 
         bold_font = QFont()
         bold_font.setBold(True)
@@ -206,6 +249,14 @@ class ActivitiesView(QWidget):
         totals_net = self._make_net_item(grand_net)
         totals_net.setFont(bold_font)
         self.table.setItem(totals_row, 4, totals_net)
+
+        totals_planned = self._make_net_item(grand_planned_net)
+        totals_planned.setFont(bold_font)
+        self.table.setItem(totals_row, 5, totals_planned)
+
+        totals_projected = self._make_net_item(grand_projected)
+        totals_projected.setFont(bold_font)
+        self.table.setItem(totals_row, 6, totals_projected)
 
     @staticmethod
     def _make_net_item(net: Decimal) -> QTableWidgetItem:
