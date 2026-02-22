@@ -313,6 +313,27 @@ class SyncQueue:
         row = await cursor.fetchone()
         return row[0] if row else 0
 
+    async def get_by_id(self, change_id: UUID) -> Optional[PendingChange]:
+        """Get a change by its queue entry ID.
+
+        Args:
+            change_id: Queue entry ID
+
+        Returns:
+            PendingChange if exists, None otherwise
+        """
+        cursor = await self._conn.execute(
+            """
+            SELECT id, entity_type, entity_id, operation, payload, local_version,
+                   created_at, retry_count, last_error, status
+            FROM sync_queue
+            WHERE id = ?
+            """,
+            (str(change_id),),
+        )
+        row = await cursor.fetchone()
+        return self._row_to_change(row) if row else None
+
     async def get_pending_for_entity(self, entity_id: UUID) -> Optional[PendingChange]:
         """Get pending change for a specific entity.
 

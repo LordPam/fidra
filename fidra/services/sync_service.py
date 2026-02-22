@@ -480,12 +480,16 @@ class SyncService(QObject):
             entity_type: Entity type (e.g. "transaction") for refresh on server-wins
             entity_id: Entity ID for refresh on server-wins
         """
-        await self._queue.resolve_conflict(change_id, use_local)
         if use_local:
-            # Trigger sync to push local version
-            await self.sync_now()
+            # Force-push local version with updated version number to
+            # avoid hitting the same conflict again on retry.
+            change = await self._queue.get_by_id(change_id)
+            if change:
+                await self._force_push(change)
+                await self._queue.dequeue(change_id)
         else:
-            # Refresh from cloud to get server version into local cache
+            # Discard local change and refresh from cloud
+            await self._queue.resolve_conflict(change_id, use_local=False)
             if entity_type:
                 await self._refresh_entity(entity_type, entity_id)
 
