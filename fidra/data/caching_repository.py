@@ -157,13 +157,23 @@ class CachingTransactionRepository(TransactionRepository):
     async def refresh_from_cloud(self) -> int:
         """Refresh local cache from cloud.
 
+        Skips entities with pending local changes to avoid overwriting
+        unsynced edits.
+
         Returns:
             Number of items refreshed
         """
         transactions = await self._cloud.get_all()
+        refreshed = 0
         for trans in transactions:
+            # Don't overwrite local edits that haven't synced yet
+            if self._sync_queue:
+                pending = await self._sync_queue.get_pending_for_entity(trans.id)
+                if pending:
+                    continue
             await self._local.save(trans, force=True)
-        return len(transactions)
+            refreshed += 1
+        return refreshed
 
     async def sync_to_cloud(self, transaction: Transaction) -> Transaction:
         """Sync a specific transaction to cloud (for sync service).
@@ -231,9 +241,15 @@ class CachingPlannedRepository(PlannedRepository):
 
     async def refresh_from_cloud(self) -> int:
         templates = await self._cloud.get_all()
+        refreshed = 0
         for template in templates:
+            if self._sync_queue:
+                pending = await self._sync_queue.get_pending_for_entity(template.id)
+                if pending:
+                    continue
             await self._local.save(template)
-        return len(templates)
+            refreshed += 1
+        return refreshed
 
     async def sync_to_cloud(self, template: PlannedTemplate) -> PlannedTemplate:
         return await self._cloud.save(template)
@@ -301,9 +317,15 @@ class CachingSheetRepository(SheetRepository):
 
     async def refresh_from_cloud(self) -> int:
         sheets = await self._cloud.get_all()
+        refreshed = 0
         for sheet in sheets:
+            if self._sync_queue:
+                pending = await self._sync_queue.get_pending_for_entity(sheet.id)
+                if pending:
+                    continue
             await self._local.save(sheet)
-        return len(sheets)
+            refreshed += 1
+        return refreshed
 
     async def sync_to_cloud(self, sheet: Sheet) -> Sheet:
         return await self._cloud.save(sheet)
