@@ -34,10 +34,11 @@ class TransactionTableModel(QAbstractTableModel):
     COL_CATEGORY = 4
     COL_PARTY = 5
     COL_REFERENCE = 6
-    COL_SHEET = 7
-    COL_STATUS = 8
-    COL_BALANCE = 9
-    COL_NOTES = 10
+    COL_ACTIVITY = 7
+    COL_SHEET = 8
+    COL_STATUS = 9
+    COL_BALANCE = 10
+    COL_NOTES = 11
 
     COLUMN_NAMES = [
         "Date",
@@ -47,6 +48,7 @@ class TransactionTableModel(QAbstractTableModel):
         "Category",
         "Party",
         "Reference",
+        "Activity",
         "Sheet",
         "Status",
         "Balance",
@@ -126,6 +128,8 @@ class TransactionTableModel(QAbstractTableModel):
             return transaction.party or ""
         elif col == self.COL_REFERENCE:
             return transaction.reference or ""
+        elif col == self.COL_ACTIVITY:
+            return transaction.activity or ""
         elif col == self.COL_SHEET:
             return transaction.sheet or ""
         elif col == self.COL_STATUS:
@@ -135,8 +139,6 @@ class TransactionTableModel(QAbstractTableModel):
             if balance is not None:
                 return f"£{balance:.2f}"
             return ""
-        elif col == self.COL_REFERENCE:
-            return transaction.reference or ""
         elif col == self.COL_NOTES:
             return transaction.notes or ""
         return None
@@ -244,6 +246,8 @@ class TransactionTableModel(QAbstractTableModel):
                 return (transaction.party or "").lower()
             if self._sort_column == self.COL_REFERENCE:
                 return (transaction.reference or "").lower()
+            if self._sort_column == self.COL_ACTIVITY:
+                return (transaction.activity or "").lower()
             if self._sort_column == self.COL_SHEET:
                 return (transaction.sheet or "").lower()
             if self._sort_column == self.COL_STATUS:
@@ -257,8 +261,6 @@ class TransactionTableModel(QAbstractTableModel):
             if self._sort_column == self.COL_BALANCE:
                 balance = self._balances.get(str(transaction.id), Decimal(0))
                 return balance
-            if self._sort_column == self.COL_REFERENCE:
-                return (transaction.reference or "").lower()
             if self._sort_column == self.COL_NOTES:
                 return (transaction.notes or "").lower()
             return transaction.date
@@ -346,6 +348,8 @@ class TransactionTableModel(QAbstractTableModel):
                 return (transaction.party or "").lower()
             elif column == self.COL_REFERENCE:
                 return (transaction.reference or "").lower()
+            elif column == self.COL_ACTIVITY:
+                return (transaction.activity or "").lower()
             elif column == self.COL_SHEET:
                 return (transaction.sheet or "").lower()
             elif column == self.COL_STATUS:
@@ -360,8 +364,6 @@ class TransactionTableModel(QAbstractTableModel):
             elif column == self.COL_BALANCE:
                 balance = self._balances.get(str(transaction.id), Decimal(0))
                 return balance
-            elif column == self.COL_REFERENCE:
-                return (transaction.reference or "").lower()
             elif column == self.COL_NOTES:
                 return (transaction.notes or "").lower()
             else:

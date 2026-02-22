@@ -147,6 +147,15 @@ class SyncService(QObject):
             self._trigger_sync.disconnect(self._handle_sync_trigger)
         except (TypeError, RuntimeError):
             pass  # Already disconnected or not connected
+
+        # Process any pending events so queued signal deliveries are
+        # consumed while _running is False (prevents orphaned coroutines
+        # during shutdown).
+        from PySide6.QtCore import QCoreApplication
+        app = QCoreApplication.instance()
+        if app:
+            app.processEvents()
+
         logger.info("Sync service stopped")
 
     async def stop_async(self) -> None:
@@ -185,9 +194,15 @@ class SyncService(QObject):
     @qasync.asyncSlot()
     async def _handle_sync_trigger(self) -> None:
         """Handle sync trigger signal - runs async sync."""
-        # Early exit if stopped
+        # Early exit if stopped or event loop is closing
         if not self._running:
             return
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed() or not loop.is_running():
+                return
+        except RuntimeError:
+            return  # No event loop available
         try:
             await self.sync_now()
         except RuntimeError as e:
@@ -493,6 +508,8 @@ class SyncService(QObject):
             party=data.get("party"),
             notes=data.get("notes"),
             reference=data.get("reference"),
+            activity=data.get("activity"),
+            is_one_time_planned=data.get("is_one_time_planned"),
             version=data.get("version", 1),
             created_at=datetime.fromisoformat(data["created_at"])
             if data.get("created_at")
@@ -520,6 +537,7 @@ class SyncService(QObject):
             target_sheet=data["target_sheet"],
             category=data.get("category"),
             party=data.get("party"),
+            activity=data.get("activity"),
             end_date=datetime.fromisoformat(data["end_date"]).date()
             if data.get("end_date")
             else None,

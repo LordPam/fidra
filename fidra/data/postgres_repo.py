@@ -95,8 +95,8 @@ class PostgresTransactionRepository(TransactionRepository):
                 """
                 INSERT INTO transactions
                 (id, date, description, amount, type, status, sheet,
-                 category, party, notes, reference, version, created_at, modified_at, modified_by)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 category, party, notes, reference, activity, version, created_at, modified_at, modified_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 ON CONFLICT (id) DO UPDATE SET
                     date = EXCLUDED.date,
                     description = EXCLUDED.description,
@@ -108,6 +108,7 @@ class PostgresTransactionRepository(TransactionRepository):
                     party = EXCLUDED.party,
                     notes = EXCLUDED.notes,
                     reference = EXCLUDED.reference,
+                    activity = EXCLUDED.activity,
                     version = EXCLUDED.version,
                     modified_at = EXCLUDED.modified_at,
                     modified_by = EXCLUDED.modified_by
@@ -123,6 +124,7 @@ class PostgresTransactionRepository(TransactionRepository):
                 transaction.party,
                 transaction.notes,
                 transaction.reference,
+                transaction.activity,
                 transaction.version,
                 transaction.created_at,
                 transaction.modified_at,
@@ -178,6 +180,7 @@ class PostgresTransactionRepository(TransactionRepository):
             party=row["party"],
             notes=row["notes"],
             reference=row["reference"],
+            activity=row.get("activity"),
             version=row["version"],
             created_at=row["created_at"],
             modified_at=row["modified_at"],
@@ -224,9 +227,9 @@ class PostgresPlannedRepository(PlannedRepository):
                 """
                 INSERT INTO planned_templates
                 (id, start_date, description, amount, type, frequency, target_sheet,
-                 category, party, end_date, occurrence_count, skipped_dates, fulfilled_dates,
+                 category, party, activity, end_date, occurrence_count, skipped_dates, fulfilled_dates,
                  version, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 ON CONFLICT (id) DO UPDATE SET
                     start_date = EXCLUDED.start_date,
                     description = EXCLUDED.description,
@@ -236,6 +239,7 @@ class PostgresPlannedRepository(PlannedRepository):
                     target_sheet = EXCLUDED.target_sheet,
                     category = EXCLUDED.category,
                     party = EXCLUDED.party,
+                    activity = EXCLUDED.activity,
                     end_date = EXCLUDED.end_date,
                     occurrence_count = EXCLUDED.occurrence_count,
                     skipped_dates = EXCLUDED.skipped_dates,
@@ -251,6 +255,7 @@ class PostgresPlannedRepository(PlannedRepository):
                 template.target_sheet,
                 template.category,
                 template.party,
+                template.activity,
                 template.end_date,
                 template.occurrence_count,
                 json.dumps(skipped_dates_json),
@@ -298,6 +303,7 @@ class PostgresPlannedRepository(PlannedRepository):
             frequency=Frequency(row["frequency"]),
             category=row["category"],
             party=row["party"],
+            activity=row.get("activity"),
             end_date=row["end_date"],
             occurrence_count=row["occurrence_count"],
             skipped_dates=skipped_dates,

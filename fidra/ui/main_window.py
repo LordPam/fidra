@@ -33,6 +33,7 @@ from fidra.ui.theme.engine import get_theme_engine, Theme
 from fidra.ui.views.dashboard_view import DashboardView
 from fidra.ui.views.transactions_view import TransactionsView
 from fidra.ui.views.planned_view import PlannedView
+from fidra.ui.views.activities_view import ActivitiesView
 from fidra.ui.views.reports_view import ReportsView
 from fidra.ui.dialogs.manage_sheets_dialog import ManageSheetsDialog
 from fidra.ui.dialogs.audit_log_dialog import AuditLogDialog
@@ -53,7 +54,8 @@ class ViewIndex(IntEnum):
     DASHBOARD = 0
     TRANSACTIONS = 1
     PLANNED = 2
-    REPORTS = 3
+    ACTIVITIES = 3
+    REPORTS = 4
 
 
 class MainWindow(QMainWindow):
@@ -122,13 +124,15 @@ class MainWindow(QMainWindow):
         self.dashboard_view = DashboardView(self._ctx)
         self.transactions_view = TransactionsView(self._ctx)
         self.planned_view = PlannedView(self._ctx)
+        self.activities_view = ActivitiesView(self._ctx)
         self.reports_view = ReportsView(self._ctx)
 
         # Add views to stack
         self.stack.addWidget(self.dashboard_view)  # Index 0
         self.stack.addWidget(self.transactions_view)  # Index 1
         self.stack.addWidget(self.planned_view)  # Index 2
-        self.stack.addWidget(self.reports_view)  # Index 3
+        self.stack.addWidget(self.activities_view)  # Index 3
+        self.stack.addWidget(self.reports_view)  # Index 4
 
         layout.addWidget(self.stack, 1)
 
@@ -212,6 +216,7 @@ class MainWindow(QMainWindow):
             ("Dashboard", ViewIndex.DASHBOARD),
             ("Transactions", ViewIndex.TRANSACTIONS),
             ("Planned", ViewIndex.PLANNED),
+            ("Activities", ViewIndex.ACTIVITIES),
             ("Reports", ViewIndex.REPORTS),
         ]
 
@@ -304,6 +309,9 @@ class MainWindow(QMainWindow):
         self._state.filtered_balance_mode.changed.connect(self._on_ui_state_changed)
         self._state.current_sheet.changed.connect(self._on_ui_state_changed)
 
+        # Activities view navigation
+        self.activities_view.activity_selected.connect(self._navigate_to_activity)
+
         # File watcher - reload data when database changes externally
         self._ctx.file_watcher.file_changed.connect(self._on_database_file_changed)
 
@@ -333,6 +341,15 @@ class MainWindow(QMainWindow):
             btn.setChecked(True)
 
         self.view_changed.emit(view_index)
+
+    def _navigate_to_activity(self, activity_name: str) -> None:
+        """Navigate to Transactions view filtered by an activity name.
+
+        Args:
+            activity_name: Activity to filter by
+        """
+        self.navigate_to(ViewIndex.TRANSACTIONS)
+        self.transactions_view.search_bar.search_input.setText(activity_name)
 
     def _on_transactions_changed(self, transactions: list) -> None:
         """Handle transaction list changes.

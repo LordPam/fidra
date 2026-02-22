@@ -17,7 +17,7 @@ class TestTransactionTableModel:
         """Empty model has zero rows."""
         model = TransactionTableModel()
         assert model.rowCount() == 0
-        assert model.columnCount() == 10  # Includes Sheet column
+        assert model.columnCount() == 12  # Includes Sheet, Activity columns
 
     def test_column_names(self):
         """Model has correct column headers."""
@@ -29,6 +29,8 @@ class TestTransactionTableModel:
             "Type",
             "Category",
             "Party",
+            "Reference",
+            "Activity",
             "Sheet",
             "Status",
             "Balance",

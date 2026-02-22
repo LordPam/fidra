@@ -102,6 +102,7 @@ class TransactionTable(QTableView):
             self._model.COL_CATEGORY: 95,
             self._model.COL_PARTY: 130,
             self._model.COL_REFERENCE: 100,
+            self._model.COL_ACTIVITY: 100,
             self._model.COL_SHEET: 80,
             self._model.COL_STATUS: 85,
             self._model.COL_BALANCE: 95,
@@ -116,6 +117,7 @@ class TransactionTable(QTableView):
             self._model.COL_CATEGORY: 85,    # Fits "Category" header
             self._model.COL_PARTY: 110,      # Close to description
             self._model.COL_REFERENCE: 80,   # Fits "Reference" header
+            self._model.COL_ACTIVITY: 80,   # Fits "Activity" header
             self._model.COL_SHEET: 75,
             self._model.COL_STATUS: 75,      # Fits "Approved"
             self._model.COL_BALANCE: 90,     # Fits negative amounts

@@ -84,12 +84,12 @@ class CSVExporter(ExportStrategy):
             if include_balance:
                 fieldnames = [
                     'Date', 'Description', 'Amount', 'Type', 'Status',
-                    'Category', 'Party', 'Reference', 'Notes', 'Balance'
+                    'Category', 'Party', 'Reference', 'Activity', 'Notes', 'Balance'
                 ]
             else:
                 fieldnames = [
                     'Date', 'Description', 'Amount', 'Type', 'Status',
-                    'Category', 'Party', 'Reference', 'Notes'
+                    'Category', 'Party', 'Reference', 'Activity', 'Notes'
                 ]
 
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -105,6 +105,7 @@ class CSVExporter(ExportStrategy):
                     'Category': trans.category or '',
                     'Party': trans.party or '',
                     'Reference': trans.reference or '',
+                    'Activity': trans.activity or '',
                     'Notes': trans.notes or '',
                 }
 
@@ -390,9 +391,9 @@ class ExportService:
         # Build TSV
         output = StringIO()
         if include_balance:
-            output.write("Date\tDescription\tAmount\tType\tStatus\tCategory\tParty\tReference\tNotes\tBalance\n")
+            output.write("Date\tDescription\tAmount\tType\tStatus\tCategory\tParty\tReference\tActivity\tNotes\tBalance\n")
         else:
-            output.write("Date\tDescription\tAmount\tType\tStatus\tCategory\tParty\tReference\tNotes\n")
+            output.write("Date\tDescription\tAmount\tType\tStatus\tCategory\tParty\tReference\tActivity\tNotes\n")
 
         for trans in sorted_transactions:
             row = [
@@ -404,6 +405,7 @@ class ExportService:
                 trans.category or '',
                 trans.party or '',
                 trans.reference or '',
+                trans.activity or '',
                 trans.notes or '',
             ]
 

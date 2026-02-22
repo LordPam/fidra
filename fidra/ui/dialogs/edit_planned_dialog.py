@@ -151,6 +151,12 @@ class EditPlannedDialog(QDialog):
 
         layout.addLayout(cat_party_layout)
 
+        # ===== ACTIVITY =====
+        self.activity_input = QLineEdit()
+        self.activity_input.setPlaceholderText("Activity")
+        self.activity_input.setMinimumHeight(32)
+        layout.addWidget(self.activity_input)
+
         # ===== SHEET & FREQUENCY ROW =====
         sheet_freq_layout = QHBoxLayout()
         sheet_freq_layout.setSpacing(8)
@@ -283,6 +289,18 @@ class EditPlannedDialog(QDialog):
             install_tab_accept(self.category_input, category_completer)
         )
 
+        activities = sorted(
+            {t.activity for t in transactions if t.activity},
+            key=str.lower,
+        )
+        activity_completer = QCompleter(activities, self)
+        activity_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        activity_completer.setFilterMode(Qt.MatchContains)
+        self.activity_input.setCompleter(activity_completer)
+        self._completer_filters.append(
+            install_tab_accept(self.activity_input, activity_completer)
+        )
+
     def _start_load_categories(self) -> None:
         """Start loading categories from database."""
         if self._context:
@@ -409,6 +427,10 @@ class EditPlannedDialog(QDialog):
         if t.party:
             self.party_input.setText(t.party)
 
+        # Activity
+        if t.activity:
+            self.activity_input.setText(t.activity)
+
         # Sheet
         if t.target_sheet and self._available_sheets:
             index = self.sheet_combo.findText(t.target_sheet)
@@ -448,6 +470,7 @@ class EditPlannedDialog(QDialog):
         trans_type = TransactionType.EXPENSE if self.expense_btn.isChecked() else TransactionType.INCOME
         category = self.category_input.currentText().strip() or None
         party = self.party_input.text().strip() or None
+        activity = self.activity_input.text().strip() or None
 
         # Frequency
         frequency_map = [
@@ -482,6 +505,7 @@ class EditPlannedDialog(QDialog):
             occurrence_count=occurrence_count,
             category=category,
             party=party,
+            activity=activity,
         )
 
         self.accept()

@@ -64,6 +64,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 category TEXT,
                 party TEXT,
                 reference TEXT,
+                activity TEXT,
                 notes TEXT,
                 version INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -86,6 +87,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 target_sheet TEXT NOT NULL,
                 category TEXT,
                 party TEXT,
+                activity TEXT,
                 end_date TEXT,
                 occurrence_count INTEGER,
                 skipped_dates TEXT DEFAULT '[]',
@@ -161,6 +163,23 @@ class SQLiteTransactionRepository(TransactionRepository):
             )
             await self._conn.commit()
 
+        if "activity" not in column_names:
+            await self._conn.execute(
+                "ALTER TABLE transactions ADD COLUMN activity TEXT"
+            )
+            await self._conn.commit()
+
+        # Add activity column to planned_templates if it doesn't exist
+        async with self._conn.execute("PRAGMA table_info(planned_templates)") as cursor:
+            pt_columns = await cursor.fetchall()
+            pt_column_names = [col[1] for col in pt_columns]
+
+        if "activity" not in pt_column_names:
+            await self._conn.execute(
+                "ALTER TABLE planned_templates ADD COLUMN activity TEXT"
+            )
+            await self._conn.commit()
+
     async def get_all(self, sheet: Optional[str] = None) -> list[Transaction]:
         """Get all transactions, optionally filtered by sheet."""
         query = "SELECT * FROM transactions"
@@ -207,8 +226,8 @@ class SQLiteTransactionRepository(TransactionRepository):
             """
             INSERT OR REPLACE INTO transactions
             (id, date, description, amount, type, status, sheet,
-             category, party, reference, notes, version, created_at, modified_at, modified_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             category, party, reference, activity, notes, version, created_at, modified_at, modified_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(transaction.id),
@@ -221,6 +240,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 transaction.category,
                 transaction.party,
                 transaction.reference,
+                transaction.activity,
                 transaction.notes,
                 transaction.version,
                 transaction.created_at.isoformat(),
@@ -266,11 +286,16 @@ class SQLiteTransactionRepository(TransactionRepository):
 
     def _row_to_transaction(self, row: aiosqlite.Row) -> Transaction:
         """Convert database row to Transaction model."""
-        # Handle reference field which may not exist in older databases
+        # Handle fields which may not exist in older databases
         try:
             reference = row["reference"]
         except (KeyError, IndexError):
             reference = None
+
+        try:
+            activity = row["activity"]
+        except (KeyError, IndexError):
+            activity = None
 
         return Transaction(
             id=UUID(row["id"]),
@@ -283,6 +308,7 @@ class SQLiteTransactionRepository(TransactionRepository):
             category=row["category"],
             party=row["party"],
             reference=reference,
+            activity=activity,
             notes=row["notes"],
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -321,9 +347,9 @@ class SQLitePlannedRepository(PlannedRepository):
             """
             INSERT OR REPLACE INTO planned_templates
             (id, start_date, description, amount, type, frequency, target_sheet,
-             category, party, end_date, occurrence_count, skipped_dates, fulfilled_dates,
+             category, party, activity, end_date, occurrence_count, skipped_dates, fulfilled_dates,
              version, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(template.id),
@@ -335,6 +361,7 @@ class SQLitePlannedRepository(PlannedRepository):
                 template.target_sheet,
                 template.category,
                 template.party,
+                template.activity,
                 template.end_date.isoformat() if template.end_date else None,
                 template.occurrence_count,
                 json.dumps([d.isoformat() for d in template.skipped_dates]),
@@ -373,6 +400,7 @@ class SQLitePlannedRepository(PlannedRepository):
             frequency=Frequency(row["frequency"]),
             category=row["category"],
             party=row["party"],
+            activity=row["activity"] if "activity" in row.keys() else None,
             end_date=date.fromisoformat(row["end_date"]) if row["end_date"] else None,
             occurrence_count=row["occurrence_count"],
             skipped_dates=skipped_dates,

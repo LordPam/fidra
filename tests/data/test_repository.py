@@ -22,7 +22,7 @@ from fidra.domain.models import (
 async def repos(tmp_path):
     """Create repositories with temporary database."""
     db_path = tmp_path / "test.db"
-    trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo = (
+    trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, sync_queue = (
         await create_repositories("sqlite", db_path)
     )
     yield trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo

@@ -76,6 +76,8 @@ class BulkEditTransactionDialog(QDialog):
         self._same_sheet = all(t.sheet == first.sheet for t in self._transactions)
         self._same_status = all(t.status == first.status for t in self._transactions)
         self._same_notes = all(t.notes == first.notes for t in self._transactions)
+        self._same_reference = all(t.reference == first.reference for t in self._transactions)
+        self._same_activity = all(t.activity == first.activity for t in self._transactions)
 
         # Store common values
         self._common_type = first.type if self._same_type else None
@@ -87,6 +89,8 @@ class BulkEditTransactionDialog(QDialog):
         self._common_sheet = first.sheet if self._same_sheet else None
         self._common_status = first.status if self._same_status else None
         self._common_notes = first.notes if self._same_notes else None
+        self._common_reference = first.reference if self._same_reference else None
+        self._common_activity = first.activity if self._same_activity else None
 
         # Check if all are expenses (for status editing)
         self._all_expenses = all(t.type == TransactionType.EXPENSE for t in self._transactions)
@@ -270,6 +274,36 @@ class BulkEditTransactionDialog(QDialog):
             self.sheet_combo = None
             self.status_combo = None
 
+        # ===== REFERENCE & ACTIVITY ROW =====
+        if self._same_reference or self._same_activity:
+            ref_act_layout = QHBoxLayout()
+            ref_act_layout.setSpacing(8)
+
+            if self._same_reference:
+                self._has_editable_fields = True
+                self.reference_input = QLineEdit()
+                self.reference_input.setPlaceholderText("Reference")
+                self.reference_input.setText(self._common_reference or "")
+                self.reference_input.setMinimumHeight(32)
+                ref_act_layout.addWidget(self.reference_input, 1)
+            else:
+                self.reference_input = None
+
+            if self._same_activity:
+                self._has_editable_fields = True
+                self.activity_input = QLineEdit()
+                self.activity_input.setPlaceholderText("Activity")
+                self.activity_input.setText(self._common_activity or "")
+                self.activity_input.setMinimumHeight(32)
+                ref_act_layout.addWidget(self.activity_input, 1)
+            else:
+                self.activity_input = None
+
+            layout.addLayout(ref_act_layout)
+        else:
+            self.reference_input = None
+            self.activity_input = None
+
         # ===== NOTES =====
         if self._same_notes:
             self._has_editable_fields = True
@@ -384,6 +418,33 @@ class BulkEditTransactionDialog(QDialog):
                 install_tab_accept(self.category_input, category_completer)
             )
 
+        references = sorted(
+            {t.reference for t in transactions if t.reference},
+            key=str.lower,
+        )
+        activities = sorted(
+            {t.activity for t in transactions if t.activity},
+            key=str.lower,
+        )
+
+        if self.reference_input:
+            ref_completer = QCompleter(references, self)
+            ref_completer.setCaseSensitivity(Qt.CaseInsensitive)
+            ref_completer.setFilterMode(Qt.MatchContains)
+            self.reference_input.setCompleter(ref_completer)
+            self._completer_filters.append(
+                install_tab_accept(self.reference_input, ref_completer)
+            )
+
+        if self.activity_input:
+            act_completer = QCompleter(activities, self)
+            act_completer.setCaseSensitivity(Qt.CaseInsensitive)
+            act_completer.setFilterMode(Qt.MatchContains)
+            self.activity_input.setCompleter(act_completer)
+            self._completer_filters.append(
+                install_tab_accept(self.activity_input, act_completer)
+            )
+
     def _update_category_list(self) -> None:
         """Update category list when type changes."""
         self._populate_categories()
@@ -443,6 +504,16 @@ class BulkEditTransactionDialog(QDialog):
                 new_status = status_map[self.status_combo.currentIndex()]
                 if new_status != trans.status:
                     updates["status"] = new_status
+
+            if self.reference_input:
+                new_reference = self.reference_input.text().strip() or None
+                if new_reference != trans.reference:
+                    updates["reference"] = new_reference
+
+            if self.activity_input:
+                new_activity = self.activity_input.text().strip() or None
+                if new_activity != trans.activity:
+                    updates["activity"] = new_activity
 
             if self.notes_input:
                 new_notes = self.notes_input.text().strip() or None

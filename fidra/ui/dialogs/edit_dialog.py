@@ -190,11 +190,21 @@ class EditTransactionDialog(QDialog):
         if len(self._available_sheets) <= 1:
             self.sheet_combo.setVisible(False)
 
-        # ===== REFERENCE =====
+        # ===== REFERENCE & ACTIVITY ROW =====
+        ref_activity_layout = QHBoxLayout()
+        ref_activity_layout.setSpacing(8)
+
         self.reference_input = QLineEdit()
-        self.reference_input.setPlaceholderText("Reference (for bank matching)")
+        self.reference_input.setPlaceholderText("Reference")
         self.reference_input.setMinimumHeight(32)
-        layout.addWidget(self.reference_input)
+        ref_activity_layout.addWidget(self.reference_input, 1)
+
+        self.activity_input = QLineEdit()
+        self.activity_input.setPlaceholderText("Activity")
+        self.activity_input.setMinimumHeight(32)
+        ref_activity_layout.addWidget(self.activity_input, 1)
+
+        layout.addLayout(ref_activity_layout)
 
         # ===== NOTES (Single line) =====
         self.notes_input = QLineEdit()
@@ -413,6 +423,12 @@ class EditTransactionDialog(QDialog):
         else:
             self.reference_input.clear()
 
+        # Activity
+        if trans.activity:
+            self.activity_input.setText(trans.activity)
+        else:
+            self.activity_input.clear()
+
         # Notes
         if trans.notes:
             self.notes_input.setText(trans.notes)
@@ -432,6 +448,7 @@ class EditTransactionDialog(QDialog):
         category = self.category_input.currentText().strip() or None
         party = self.party_input.text().strip() or None
         reference = self.reference_input.text().strip() or None
+        activity = self.activity_input.text().strip() or None
         notes = self.notes_input.text().strip() or None
 
         # Sheet (use selected if available, otherwise keep original)
@@ -463,6 +480,7 @@ class EditTransactionDialog(QDialog):
             category=category,
             party=party,
             reference=reference,
+            activity=activity,
             notes=notes,
             status=status,
         )
@@ -493,16 +511,19 @@ class EditTransactionDialog(QDialog):
             return
         self._completer_filters = []
 
-        # Get existing descriptions and parties from transactions
+        # Get existing descriptions, parties, and activities from transactions
         transactions = self._context.state.transactions.value
         descriptions = set()
         parties = set()
+        activities = set()
 
         for t in transactions:
             if t.description:
                 descriptions.add(t.description)
             if t.party:
                 parties.add(t.party)
+            if t.activity:
+                activities.add(t.activity)
 
         # Description completer
         desc_completer = QCompleter(sorted(descriptions, key=str.lower), self)
@@ -520,6 +541,15 @@ class EditTransactionDialog(QDialog):
         self.party_input.setCompleter(party_completer)
         self._completer_filters.append(
             install_tab_accept(self.party_input, party_completer)
+        )
+
+        # Activity completer
+        activity_completer = QCompleter(sorted(activities, key=str.lower), self)
+        activity_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        activity_completer.setFilterMode(Qt.MatchContains)
+        self.activity_input.setCompleter(activity_completer)
+        self._completer_filters.append(
+            install_tab_accept(self.activity_input, activity_completer)
         )
 
     def get_edited_transaction(self) -> Optional[Transaction]:

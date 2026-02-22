@@ -279,6 +279,12 @@ class SearchService:
         if transaction.party:
             parts.append(transaction.party)
 
+        if transaction.reference:
+            parts.append(transaction.reference)
+
+        if transaction.activity:
+            parts.append(transaction.activity)
+
         if transaction.notes:
             parts.append(transaction.notes)
 
