@@ -373,6 +373,14 @@ class SQLitePlannedRepository(PlannedRepository):
         await self._conn.commit()
         return template
 
+    async def get_version(self, id: UUID) -> Optional[int]:
+        """Get current version for optimistic concurrency."""
+        async with self._conn.execute(
+            "SELECT version FROM planned_templates WHERE id = ?", (str(id),)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["version"] if row else None
+
     async def delete(self, id: UUID) -> bool:
         """Delete a planned template."""
         cursor = await self._conn.execute(

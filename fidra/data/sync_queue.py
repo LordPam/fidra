@@ -74,7 +74,21 @@ class SyncQueue:
         self._conn = await aiosqlite.connect(self._db_path)
         await self._conn.execute("PRAGMA foreign_keys = ON")
         await self._ensure_schema()
+        await self._recover_stuck_processing()
         logger.info(f"Sync queue initialized at {self._db_path}")
+
+    async def _recover_stuck_processing(self) -> None:
+        """Reset any items stuck in 'processing' from a previous crash.
+
+        If the app crashes mid-sync, items remain in 'processing' status
+        and are never retried. Reset them back to 'pending'.
+        """
+        cursor = await self._conn.execute(
+            "UPDATE sync_queue SET status = 'pending' WHERE status = 'processing'"
+        )
+        await self._conn.commit()
+        if cursor.rowcount and cursor.rowcount > 0:
+            logger.info(f"Recovered {cursor.rowcount} stuck processing items")
 
     async def _ensure_schema(self) -> None:
         """Create sync queue tables if they don't exist."""
@@ -190,12 +204,15 @@ class SyncQueue:
             )
             await self.enqueue(change)
 
-    async def enqueue_delete(self, entity_type: str, entity_id: UUID) -> None:
+    async def enqueue_delete(
+        self, entity_type: str, entity_id: UUID, version: int = 0
+    ) -> None:
         """Convenience method to enqueue a delete operation.
 
         Args:
             entity_type: Type of entity
             entity_id: ID of entity to delete
+            version: Expected server version for version-checked delete (0 = skip check)
         """
         # Check BEFORE removing: was this entity only ever created locally?
         existing = await self.get_pending_for_entity(entity_id)
@@ -221,7 +238,7 @@ class SyncQueue:
             entity_id=entity_id,
             operation=SyncOperation.DELETE,
             payload="{}",
-            local_version=0,
+            local_version=version,
             created_at=datetime.now(),
         )
         await self.enqueue(change)
@@ -333,6 +350,22 @@ class SyncQueue:
         )
         row = await cursor.fetchone()
         return self._row_to_change(row) if row else None
+
+    async def has_pending_for_type(self, entity_type: str) -> bool:
+        """Check if any pending or processing changes exist for an entity type.
+
+        Args:
+            entity_type: Type of entity (e.g. "category", "transaction")
+
+        Returns:
+            True if pending changes exist for this type
+        """
+        cursor = await self._conn.execute(
+            "SELECT 1 FROM sync_queue WHERE entity_type = ? AND status IN ('pending', 'processing') LIMIT 1",
+            (entity_type,),
+        )
+        row = await cursor.fetchone()
+        return row is not None
 
     async def get_pending_for_entity(self, entity_id: UUID) -> Optional[PendingChange]:
         """Get pending change for a specific entity.

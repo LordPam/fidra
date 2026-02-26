@@ -1,6 +1,7 @@
 """Main application window with tab-based navigation."""
 
 import asyncio
+import json
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
 
-from fidra.domain.models import PlannedTemplate, Transaction
+from fidra.domain.models import PlannedTemplate, Sheet, Transaction
 from fidra.ui.theme.engine import get_theme_engine, Theme
 from fidra.ui.views.dashboard_view import DashboardView
 from fidra.ui.views.transactions_view import TransactionsView
@@ -821,35 +822,31 @@ class MainWindow(QMainWindow):
             local_data: Local version as a dict (from sync queue payload)
             server_entity: Server version as a domain object
         """
-        # Currently only handle transaction conflicts with the dialog
-        if not isinstance(server_entity, Transaction):
-            # For non-transaction entities, fall back to server wins
+        if isinstance(server_entity, Transaction):
+            local_entity = self._ctx.sync_service._deserialize_transaction(local_data)
+            entity_type = "transaction"
+        elif isinstance(server_entity, PlannedTemplate):
+            local_entity = self._ctx.sync_service._deserialize_planned(local_data)
+            entity_type = "planned_template"
+        else:
+            # For unsupported entity types, fall back to server wins
             asyncio.ensure_future(
                 self._ctx.sync_service.resolve_conflict_with_choice(
                     change_id, use_local=False,
-                    entity_type=getattr(server_entity, '__class__.__name__', '').lower(),
+                    entity_type=getattr(server_entity, '__class__', type(server_entity)).__name__.lower(),
                 )
             )
             return
 
-        # Deserialize local dict into a Transaction for the dialog
-        local_transaction = self._ctx.sync_service._deserialize_transaction(local_data)
-
-        dialog = ConflictResolutionDialog(local_transaction, server_entity, parent=self)
-        result = dialog.exec()
+        dialog = ConflictResolutionDialog(local_entity, server_entity, parent=self)
+        dialog.exec()
 
         resolution = dialog.get_resolution()
-        if resolution == ConflictResolution.KEEP_MINE:
-            asyncio.ensure_future(self._resolve_conflict(
-                change_id, use_local=True,
-                entity_type="transaction", entity_id=server_entity.id,
-            ))
-        elif resolution == ConflictResolution.USE_THEIRS:
-            asyncio.ensure_future(self._resolve_conflict(
-                change_id, use_local=False,
-                entity_type="transaction", entity_id=server_entity.id,
-            ))
-        # CANCEL: leave the conflict in the queue for next sync cycle
+        use_local = resolution == ConflictResolution.KEEP_MINE
+        asyncio.ensure_future(self._resolve_conflict(
+            change_id, use_local=use_local,
+            entity_type=entity_type, entity_id=server_entity.id,
+        ))
 
     async def _resolve_conflict(
         self, change_id, use_local: bool, entity_type: str, entity_id
@@ -862,6 +859,44 @@ class MainWindow(QMainWindow):
         # Reload data so the UI reflects the resolution
         await self._ctx._load_initial_data()
 
+    def _show_unresolved_conflict_banner(self) -> None:
+        """Show a persistent banner for unresolved sync conflicts."""
+        self.notification_banner.show_warning(
+            "You have unresolved sync conflicts. Changes won't sync until resolved.",
+            action_text="Resolve",
+            action_callback=self._on_resolve_conflicts_clicked,
+        )
+
+    @qasync.asyncSlot()
+    async def _on_resolve_conflicts_clicked(self) -> None:
+        """Re-show the conflict dialog for the first unresolved conflict."""
+        if not self._ctx.sync_queue:
+            return
+        conflicts = await self._ctx.sync_queue.get_conflicts()
+        if not conflicts:
+            return
+        conflict = conflicts[0]
+        server_entity = await self._ctx.sync_service._fetch_server_entity(conflict)
+        if server_entity is None:
+            # Server entity gone — auto-resolve by discarding local change
+            await self._ctx.sync_service.resolve_conflict_with_choice(
+                conflict.id, use_local=False,
+                entity_type=conflict.entity_type, entity_id=conflict.entity_id,
+            )
+            await self._ctx._load_initial_data()
+            return
+        local_data = json.loads(conflict.payload)
+        self._on_sync_conflict_detected(conflict.id, local_data, server_entity)
+
+    @qasync.asyncSlot()
+    async def check_unresolved_conflicts(self) -> None:
+        """Check for unresolved conflicts on startup and show banner if any."""
+        if not self._ctx.sync_queue:
+            return
+        conflicts = await self._ctx.sync_queue.get_conflicts()
+        if conflicts:
+            self._show_unresolved_conflict_banner()
+
     @qasync.asyncSlot()
     async def check_opening_balance(self) -> None:
         """Check first-run conditions and prompt user as needed.
@@ -870,6 +905,7 @@ class MainWindow(QMainWindow):
         Checks in order:
         1. Profile setup (if name is empty)
         2. Opening balance (if database is empty)
+        3. Unresolved sync conflicts
         """
         # First, check if profile needs to be set up
         # Skip if setup wizard was completed (first_run_complete=True) or if name exists
@@ -880,6 +916,10 @@ class MainWindow(QMainWindow):
         transactions = self._state.transactions.value
         if not transactions:
             await self._prompt_opening_balance()
+
+        # Check for unresolved sync conflicts (after short delay)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(2000, self.check_unresolved_conflicts)
 
     def _prompt_profile_setup(self) -> None:
         """Show the profile setup dialog for first-run."""

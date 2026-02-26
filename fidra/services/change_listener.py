@@ -117,11 +117,13 @@ class ChangeListener(QObject):
         self,
         cloud_connection: "CloudConnection",
         debounce_ms: int = 1000,
+        health_check_ms: int = 60000,
         parent: Optional[QObject] = None,
     ):
         super().__init__(parent)
         self._cloud_connection = cloud_connection
         self._debounce_ms = debounce_ms
+        self._health_check_ms = health_check_ms
 
         self._listener_conn: Optional[asyncpg.Connection] = None
         self._dirty_tables: set[str] = set()
@@ -136,6 +138,18 @@ class ChangeListener(QObject):
 
         # Thread-safe bridge: notification callback → Qt thread
         self._trigger_debounce.connect(self._restart_debounce_timer)
+
+        # Health check timer: periodically verify connection is alive
+        self._health_timer = QTimer(self)
+        self._health_timer.setInterval(health_check_ms)
+        self._health_timer.timeout.connect(self._on_health_check)
+
+        # Polling fallback timer: detect changes if LISTEN/NOTIFY misses them
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(health_check_ms)
+        self._poll_timer.timeout.connect(self._on_poll_fallback)
+        self._poll_baselines: dict[str, Optional[str]] = {}
+        self._poll_initialized = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -169,6 +183,8 @@ class ChangeListener(QObject):
                 return
 
             self._is_running = True
+            self._health_timer.start()
+            self._poll_timer.start()
             logger.info("Change listener started")
             print("[LISTEN] Change listener started (verified)")
             self.listener_started.emit()
@@ -182,6 +198,10 @@ class ChangeListener(QObject):
         """Stop listening and close the dedicated connection."""
         self._is_running = False
         self._debounce_timer.stop()
+        self._health_timer.stop()
+        self._poll_timer.stop()
+        self._poll_baselines.clear()
+        self._poll_initialized = False
         self._dirty_tables.clear()
 
         if self._listener_conn:
@@ -282,6 +302,57 @@ class ChangeListener(QObject):
         logger.info(f"Remote changes detected: {changed}")
         print(f"[LISTEN] Remote changes: {changed}")
         self.tables_changed.emit(changed)
+
+    # ------------------------------------------------------------------
+    # Health check & polling fallback
+    # ------------------------------------------------------------------
+
+    @qasync.asyncSlot()
+    async def _on_health_check(self) -> None:
+        """Verify the listener connection is still alive."""
+        if not self._is_running or not self._listener_conn:
+            return
+        try:
+            await self._listener_conn.execute("SELECT 1")
+        except Exception as e:
+            logger.warning(f"Listener health check failed: {e}")
+            print(f"[LISTEN] Health check failed, restarting: {e}")
+            await self.restart()
+
+    @qasync.asyncSlot()
+    async def _on_poll_fallback(self) -> None:
+        """Poll for changes as a fallback if LISTEN/NOTIFY misses events."""
+        if not self._is_running or not self._listener_conn:
+            return
+        try:
+            changed = set()
+            queries = {
+                "transactions": "SELECT MAX(modified_at)::text FROM transactions",
+                "planned_templates": "SELECT MAX(created_at)::text FROM planned_templates",
+                "sheets": "SELECT MAX(created_at)::text FROM sheets",
+                "categories": "SELECT COUNT(*)::text FROM categories",
+            }
+            for table, query in queries.items():
+                try:
+                    row = await self._listener_conn.fetchrow(query)
+                    current = row[0] if row and row[0] else None
+                except Exception:
+                    continue
+                baseline = self._poll_baselines.get(table)
+                if self._poll_initialized and current != baseline:
+                    changed.add(table)
+                self._poll_baselines[table] = current
+
+            if not self._poll_initialized:
+                self._poll_initialized = True
+                return
+
+            if changed:
+                logger.info(f"Poll fallback detected changes: {changed}")
+                print(f"[LISTEN] Poll detected changes: {changed}")
+                self.tables_changed.emit(changed)
+        except Exception as e:
+            logger.warning(f"Poll fallback error: {e}")
 
     # ------------------------------------------------------------------
     # Internal

@@ -5,9 +5,12 @@ and provides them to the UI layer.
 """
 
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
+
+logger = logging.getLogger(__name__)
 
 from fidra.data.factory import create_repositories
 from fidra.data.repository import (
@@ -78,6 +81,10 @@ class ApplicationContext:
         self.sync_queue: Optional["SyncQueue"] = None
         self.sync_service: Optional["SyncService"] = None
         self.change_listener = None  # ChangeListener for real-time LISTEN/NOTIFY
+
+        # Buffered remote changes during sync + post-sync cooldown
+        self._buffered_remote_changes: set[str] = set()
+        self._sync_cooldown_until: float = 0.0
 
         # Repositories (initialized in initialize())
         self.transaction_repo: Optional[TransactionRepository] = None
@@ -212,9 +219,7 @@ class ApplicationContext:
         self.sync_service.pending_count_changed.connect(
             lambda count: self.state.pending_sync_count.set(count)
         )
-        self.sync_service.sync_completed.connect(
-            lambda _: self.state.last_sync_time.set(datetime.now())
-        )
+        self.sync_service.sync_completed.connect(self._on_sync_completed)
 
         # Trigger immediate sync and restart listener when connection is restored
         def on_status_changed(status: ConnectionStatus):
@@ -255,8 +260,45 @@ class ApplicationContext:
         )
         await self.change_listener.start()
 
+    def _on_sync_completed(self, count: int) -> None:
+        """Handle sync completion: set cooldown and replay buffered changes."""
+        import time
+
+        self.state.last_sync_time.set(datetime.now())
+
+        if count > 0:
+            # Set a 2-second cooldown to ignore self-triggered NOTIFY events
+            self._sync_cooldown_until = time.monotonic() + 2.0
+
+        # Replay any changes that were buffered during sync
+        if self._buffered_remote_changes:
+            buffered = self._buffered_remote_changes.copy()
+            self._buffered_remote_changes.clear()
+            logger.debug(f"Replaying buffered remote changes: {buffered}")
+            # Delay replay past the cooldown window so genuine remote changes
+            # (vs self-triggered ones) get processed. If they were self-triggered,
+            # the cooldown will filter them. If they were genuine, we want them.
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(
+                2500,
+                lambda: asyncio.ensure_future(self._on_remote_tables_changed(buffered)),
+            )
+
     async def _on_remote_tables_changed(self, changed_tables: set) -> None:
         """Handle remote data changes detected via LISTEN/NOTIFY."""
+        # Buffer changes while sync is in progress — they'll be replayed when sync completes
+        if self.sync_service and self.sync_service.is_syncing:
+            logger.debug(f"Buffering remote changes during sync: {changed_tables}")
+            self._buffered_remote_changes.update(changed_tables)
+            return
+
+        # Skip notifications that arrive within the post-sync cooldown window
+        # (these are almost certainly self-triggered by our own push)
+        import time
+        if time.monotonic() < self._sync_cooldown_until:
+            logger.debug(f"Ignoring self-triggered notification: {changed_tables}")
+            return
+
         for attempt in range(2):
             try:
                 if "transactions" in changed_tables and hasattr(self.transaction_repo, 'refresh_from_cloud'):
@@ -422,6 +464,13 @@ class ApplicationContext:
                 except asyncio.TimeoutError:
                     print("Warning: Connection state stop timed out")
                 self.connection_state = None
+
+            # Close local cache connections (SQLite cache used by caching repos)
+            if self.transaction_repo and hasattr(self.transaction_repo, 'close'):
+                try:
+                    await asyncio.wait_for(self.transaction_repo.close(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception):
+                    pass
 
             # Close cloud connection (uses timeout with terminate() fallback)
             if self._cloud_connection:

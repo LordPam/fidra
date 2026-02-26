@@ -352,3 +352,9 @@ class ConcurrencyError(Exception):
     """Raised when a version conflict is detected during save."""
 
     pass
+
+
+class EntityDeletedError(ConcurrencyError):
+    """Raised when trying to save an entity that was deleted on the server."""
+
+    pass

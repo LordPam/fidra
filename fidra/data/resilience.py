@@ -78,8 +78,8 @@ def classify_error(exception: Exception) -> ErrorCategory:
     error_type = type(exception).__name__
     error_msg = str(exception).lower()
 
-    # Check for version conflict (custom error)
-    if "ConcurrencyError" in error_type or "version" in error_msg:
+    # Check for version conflict (custom error) or entity deleted on server
+    if "ConcurrencyError" in error_type or "EntityDeletedError" in error_type or "version conflict" in error_msg:
         return ErrorCategory.CONFLICT
 
     # Check error type name

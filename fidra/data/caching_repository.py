@@ -65,21 +65,17 @@ class CachingTransactionRepository(TransactionRepository):
         """Initialize local cache from cloud data.
 
         Call this once after connection is established.
+        Uses refresh_from_cloud to also clean up stale local entities
+        that were deleted on the server since the last session.
         """
         if self._cache_initialized:
             return
 
         logger.info("Initializing transaction cache from cloud...")
         try:
-            # Fetch all from cloud
-            transactions = await self._cloud.get_all()
-
-            # Clear and repopulate local cache
-            for trans in transactions:
-                await self._local.save(trans)
-
+            refreshed = await self.refresh_from_cloud()
             self._cache_initialized = True
-            logger.info(f"Transaction cache initialized with {len(transactions)} items")
+            logger.info(f"Transaction cache initialized ({refreshed} items refreshed)")
         except Exception as e:
             logger.error(f"Failed to initialize cache: {e}")
             raise
@@ -119,6 +115,8 @@ class CachingTransactionRepository(TransactionRepository):
     async def delete(self, id: UUID) -> None:
         """Delete transaction from local cache and queue for sync."""
         print(f"[CACHE] Deleting transaction {id} from local cache...")
+        # Get version before deleting for version-checked cloud delete
+        version = await self._local.get_version(id) or 0
         # Delete from local cache
         await self._local.delete(id)
         print(f"[CACHE] Local delete complete")
@@ -126,7 +124,7 @@ class CachingTransactionRepository(TransactionRepository):
         # Queue for cloud sync
         if self._sync_queue:
             print(f"[CACHE] Queueing delete for sync...")
-            await self._sync_queue.enqueue_delete("transaction", id)
+            await self._sync_queue.enqueue_delete("transaction", id, version=version)
             print(f"[CACHE] Delete queued for sync")
 
     async def bulk_save(self, transactions: list[Transaction]) -> None:
@@ -139,11 +137,19 @@ class CachingTransactionRepository(TransactionRepository):
 
     async def bulk_delete(self, ids: list[UUID]) -> None:
         """Bulk delete transactions from local cache and queue for sync."""
+        # Capture versions before deleting for version-checked cloud deletes
+        versions = {}
+        if self._sync_queue:
+            for id in ids:
+                versions[id] = await self._local.get_version(id) or 0
+
         await self._local.bulk_delete(ids)
 
         if self._sync_queue:
             for id in ids:
-                await self._sync_queue.enqueue_delete("transaction", id)
+                await self._sync_queue.enqueue_delete(
+                    "transaction", id, version=versions.get(id, 0)
+                )
 
     async def get_version(self, id: UUID) -> Optional[int]:
         """Get current version from local cache."""
@@ -158,14 +164,16 @@ class CachingTransactionRepository(TransactionRepository):
         """Refresh local cache from cloud.
 
         Skips entities with pending local changes to avoid overwriting
-        unsynced edits.
+        unsynced edits. Deletes local entities that no longer exist on server.
 
         Returns:
             Number of items refreshed
         """
-        transactions = await self._cloud.get_all()
+        cloud_transactions = await self._cloud.get_all()
+        cloud_ids = {t.id for t in cloud_transactions}
         refreshed = 0
-        for trans in transactions:
+
+        for trans in cloud_transactions:
             # Don't overwrite local edits that haven't synced yet
             if self._sync_queue:
                 pending = await self._sync_queue.get_pending_for_entity(trans.id)
@@ -173,6 +181,19 @@ class CachingTransactionRepository(TransactionRepository):
                     continue
             await self._local.save(trans, force=True)
             refreshed += 1
+
+        # Remove local entities that were deleted on server
+        local_transactions = await self._local.get_all()
+        for local_trans in local_transactions:
+            if local_trans.id not in cloud_ids:
+                # Don't delete if there's a pending local change
+                if self._sync_queue:
+                    pending = await self._sync_queue.get_pending_for_entity(local_trans.id)
+                    if pending:
+                        continue
+                await self._local.delete(local_trans.id)
+                refreshed += 1
+
         return refreshed
 
     async def sync_to_cloud(self, transaction: Transaction) -> Transaction:
@@ -210,11 +231,9 @@ class CachingPlannedRepository(PlannedRepository):
             return
 
         logger.info("Initializing planned templates cache from cloud...")
-        templates = await self._cloud.get_all()
-        for template in templates:
-            await self._local.save(template)
+        refreshed = await self.refresh_from_cloud()
         self._cache_initialized = True
-        logger.info(f"Planned cache initialized with {len(templates)} items")
+        logger.info(f"Planned cache initialized ({refreshed} items refreshed)")
 
     async def get_all(self) -> list[PlannedTemplate]:
         return await self._local.get_all()
@@ -229,9 +248,12 @@ class CachingPlannedRepository(PlannedRepository):
         return result
 
     async def delete(self, id: UUID) -> None:
+        version = 0
+        if hasattr(self._local, 'get_version'):
+            version = await self._local.get_version(id) or 0
         await self._local.delete(id)
         if self._sync_queue:
-            await self._sync_queue.enqueue_delete("planned_template", id)
+            await self._sync_queue.enqueue_delete("planned_template", id, version=version)
 
     async def get_version(self, id: UUID) -> Optional[int]:
         return await self._local.get_version(id)
@@ -240,15 +262,29 @@ class CachingPlannedRepository(PlannedRepository):
         await self._local.close()
 
     async def refresh_from_cloud(self) -> int:
-        templates = await self._cloud.get_all()
+        cloud_templates = await self._cloud.get_all()
+        cloud_ids = {t.id for t in cloud_templates}
         refreshed = 0
-        for template in templates:
+
+        for template in cloud_templates:
             if self._sync_queue:
                 pending = await self._sync_queue.get_pending_for_entity(template.id)
                 if pending:
                     continue
             await self._local.save(template)
             refreshed += 1
+
+        # Remove local entities deleted on server
+        local_templates = await self._local.get_all()
+        for local_tmpl in local_templates:
+            if local_tmpl.id not in cloud_ids:
+                if self._sync_queue:
+                    pending = await self._sync_queue.get_pending_for_entity(local_tmpl.id)
+                    if pending:
+                        continue
+                await self._local.delete(local_tmpl.id)
+                refreshed += 1
+
         return refreshed
 
     async def sync_to_cloud(self, template: PlannedTemplate) -> PlannedTemplate:
@@ -280,11 +316,9 @@ class CachingSheetRepository(SheetRepository):
             return
 
         logger.info("Initializing sheets cache from cloud...")
-        sheets = await self._cloud.get_all()
-        for sheet in sheets:
-            await self._local.save(sheet)
+        refreshed = await self.refresh_from_cloud()
         self._cache_initialized = True
-        logger.info(f"Sheets cache initialized with {len(sheets)} items")
+        logger.info(f"Sheets cache initialized ({refreshed} items refreshed)")
 
     async def get_all(self) -> list[Sheet]:
         return await self._local.get_all()
@@ -316,15 +350,29 @@ class CachingSheetRepository(SheetRepository):
         await self._local.close()
 
     async def refresh_from_cloud(self) -> int:
-        sheets = await self._cloud.get_all()
+        cloud_sheets = await self._cloud.get_all()
+        cloud_ids = {s.id for s in cloud_sheets}
         refreshed = 0
-        for sheet in sheets:
+
+        for sheet in cloud_sheets:
             if self._sync_queue:
                 pending = await self._sync_queue.get_pending_for_entity(sheet.id)
                 if pending:
                     continue
             await self._local.save(sheet)
             refreshed += 1
+
+        # Remove local sheets deleted on server
+        local_sheets = await self._local.get_all()
+        for local_sheet in local_sheets:
+            if local_sheet.id not in cloud_ids:
+                if self._sync_queue:
+                    pending = await self._sync_queue.get_pending_for_entity(local_sheet.id)
+                    if pending:
+                        continue
+                await self._local.delete(local_sheet.id)
+                refreshed += 1
+
         return refreshed
 
     async def sync_to_cloud(self, sheet: Sheet) -> Sheet:
@@ -392,9 +440,15 @@ class CachingCategoryRepository(CategoryRepository):
         self._local.set_connection(conn)
 
     async def refresh_from_cloud(self) -> int:
+        # Don't overwrite local categories if there are pending category changes
+        if self._sync_queue:
+            has_pending = await self._sync_queue.has_pending_for_type("category")
+            if has_pending:
+                logger.debug("Skipping category refresh — pending local changes")
+                return 0
+
         income_cats = await self._cloud.get_all("income")
         expense_cats = await self._cloud.get_all("expense")
-        # Clear and repopulate
         await self._local.set_all("income", income_cats)
         await self._local.set_all("expense", expense_cats)
         return len(income_cats) + len(expense_cats)

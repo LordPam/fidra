@@ -17,6 +17,7 @@ import qasync
 
 from fidra.data.sync_queue import PendingChange, SyncOperation, SyncStatus
 from fidra.data.resilience import classify_error, ErrorCategory
+from fidra.data.repository import EntityDeletedError
 from fidra.domain.models import Transaction, PlannedTemplate, Sheet
 
 if TYPE_CHECKING:
@@ -102,6 +103,7 @@ class SyncService(QObject):
         self._running = False
         self._sync_timer: Optional[QTimer] = None
         self._loop_count = 0
+        self._max_retries = 10  # After this many transient failures, escalate to conflict
 
         # Debounce timer for event-driven sync (triggered by queue changes)
         self._push_debounce = QTimer(self)
@@ -254,6 +256,10 @@ class SyncService(QObject):
     async def _process_pending_changes(self) -> int:
         """Process all pending changes in the queue.
 
+        Stops processing on the first transient (network) error to avoid
+        burning through retry counts on all pending items when the connection
+        is down. Conflicts and permanent errors only affect the single item.
+
         Returns:
             Number of successfully synced changes
         """
@@ -271,6 +277,12 @@ class SyncService(QObject):
                 synced += 1
             except Exception as e:
                 await self._handle_sync_error(change, e)
+                # Stop processing remaining items on transient errors (likely
+                # network down). No point burning retry counts on every item.
+                category = classify_error(e)
+                if category == ErrorCategory.TRANSIENT:
+                    logger.info("Stopping sync batch — transient error, will retry next cycle")
+                    break
 
         logger.info(f"Synced {synced}/{len(pending)} changes")
         return synced
@@ -297,21 +309,34 @@ class SyncService(QObject):
     async def _sync_transaction(self, change: PendingChange) -> None:
         """Sync a transaction change."""
         if change.operation == SyncOperation.DELETE:
-            await self._transaction_repo.delete_from_cloud(change.entity_id)
+            if change.local_version > 0:
+                await self._transaction_repo._cloud.delete_versioned(
+                    change.entity_id, change.local_version
+                )
+            else:
+                await self._transaction_repo.delete_from_cloud(change.entity_id)
         else:
             # Create or update
             data = json.loads(change.payload)
             transaction = self._deserialize_transaction(data)
-            await self._transaction_repo.sync_to_cloud(transaction)
+            result = await self._transaction_repo.sync_to_cloud(transaction)
+            # Keep local cache in sync with cloud response (has updated version/timestamps)
+            await self._transaction_repo._local.save(result, force=True)
 
     async def _sync_planned(self, change: PendingChange) -> None:
         """Sync a planned template change."""
         if change.operation == SyncOperation.DELETE:
-            await self._planned_repo.delete_from_cloud(change.entity_id)
+            if change.local_version > 0:
+                await self._planned_repo._cloud.delete_versioned(
+                    change.entity_id, change.local_version
+                )
+            else:
+                await self._planned_repo.delete_from_cloud(change.entity_id)
         else:
             data = json.loads(change.payload)
             template = self._deserialize_planned(data)
-            await self._planned_repo.sync_to_cloud(template)
+            result = await self._planned_repo.sync_to_cloud(template)
+            await self._planned_repo._local.save(result)
 
     async def _sync_sheet(self, change: PendingChange) -> None:
         """Sync a sheet change."""
@@ -320,22 +345,40 @@ class SyncService(QObject):
         else:
             data = json.loads(change.payload)
             sheet = self._deserialize_sheet(data)
-            await self._sheet_repo.sync_to_cloud(sheet)
+            result = await self._sheet_repo.sync_to_cloud(sheet)
+            await self._sheet_repo._local.save(result)
 
     async def _sync_category(self, change: PendingChange) -> None:
-        """Sync a category change."""
+        """Sync a category change.
+
+        For add/remove: checks if the operation is still needed (idempotent).
+        For reorder: fetches server list and merges any new categories that
+        were added on another device but aren't in our reordered list.
+        """
         data = json.loads(change.payload)
         action = data.get("action")
         name = data.get("name")
         type_ = data.get("type")
 
         if action == "add":
+            # Idempotent — cloud add uses ON CONFLICT DO NOTHING
             await self._category_repo._cloud.add(type_, name)
         elif action == "remove":
+            # Idempotent — removing a non-existent category is a no-op
             await self._category_repo._cloud.remove(type_, name)
         elif action == "reorder":
             names = data.get("names", [])
+            # Merge: keep any server-side categories that we don't know about
+            server_names = await self._category_repo._cloud.get_all(type_)
+            local_set = set(names)
+            # Append any server categories not in our list (added on another device)
+            for sn in server_names:
+                if sn not in local_set:
+                    names.append(sn)
+                    logger.info(f"Category merge: keeping server-added '{sn}' ({type_})")
             await self._category_repo._cloud.set_all(type_, names)
+            # Update local cache to match merged result
+            await self._category_repo._local.set_all(type_, names)
 
     async def _handle_sync_error(self, change: PendingChange, error: Exception) -> None:
         """Handle an error during sync.
@@ -344,11 +387,34 @@ class SyncService(QObject):
             change: The change that failed
             error: The exception
         """
+        # Entity was deleted on server — accept the deletion locally
+        if isinstance(error, EntityDeletedError):
+            logger.info(f"Entity {change.entity_id} deleted on server, removing locally")
+            await self._queue.dequeue(change.id)
+            # Delete from local cache to match server state
+            if change.entity_type == "transaction":
+                await self._transaction_repo._local.delete(change.entity_id)
+            elif change.entity_type == "planned_template":
+                await self._planned_repo._local.delete(change.entity_id)
+            elif change.entity_type == "sheet":
+                await self._sheet_repo._local.delete(change.entity_id)
+            return
+
         category = classify_error(error)
 
         if category == ErrorCategory.CONFLICT:
             await self._handle_conflict(change, error)
         elif category == ErrorCategory.TRANSIENT:
+            # Check if we've exceeded retry limit
+            if change.retry_count >= self._max_retries:
+                await self._queue.mark_conflict(
+                    change.id,
+                    f"Max retries ({self._max_retries}) exceeded: {error}",
+                )
+                logger.error(
+                    f"Change {change.entity_id} exceeded max retries, escalated to conflict"
+                )
+                return
             # Transient error (likely network) - report to connection state and retry later
             await self._queue.mark_failed(change.id, str(error))
             # Notify connection state service of potential network issue
@@ -369,6 +435,14 @@ class SyncService(QObject):
         """
         logger.warning(f"Conflict detected for {change.entity_type} {change.entity_id}")
 
+        # Check for phantom conflict (identical content, only version differs)
+        server_entity = await self._fetch_server_entity(change)
+        if server_entity and self._is_same_content(change, server_entity):
+            logger.info(f"Phantom conflict for {change.entity_id} — content identical, auto-resolving")
+            await self._queue.dequeue(change.id)
+            await self._refresh_entity(change.entity_type, change.entity_id)
+            return
+
         if self._conflict_strategy == ConflictStrategy.SERVER_WINS:
             # Discard local change, refresh from cloud
             await self._queue.dequeue(change.id)
@@ -385,7 +459,12 @@ class SyncService(QObject):
         elif self._conflict_strategy == ConflictStrategy.ASK_USER:
             # Mark as conflict and emit signal for UI
             await self._queue.mark_conflict(change.id, str(error))
-            server_entity = await self._fetch_server_entity(change)
+            if server_entity is None:
+                # Can't show comparison dialog without server entity — fall back to server wins
+                logger.warning(f"Cannot fetch server entity for conflict {change.entity_id}, discarding local")
+                await self._queue.dequeue(change.id)
+                await self._refresh_entity(change.entity_type, change.entity_id)
+                return
             local_entity = json.loads(change.payload)
             self.conflict_detected.emit(change.id, local_entity, server_entity)
 
@@ -399,7 +478,10 @@ class SyncService(QObject):
             await self._sheet_repo.refresh_from_cloud()
 
     async def _force_push(self, change: PendingChange) -> None:
-        """Force push a change, overwriting server version."""
+        """Force push a change, overwriting server version.
+
+        Also dequeues the change after successful push so callers don't need to.
+        """
         # Get current server version, increment, and push
         data = json.loads(change.payload)
 
@@ -407,7 +489,23 @@ class SyncService(QObject):
             current_version = await self._transaction_repo._cloud.get_version(change.entity_id)
             data["version"] = (current_version or 0) + 1
             transaction = self._deserialize_transaction(data)
-            await self._transaction_repo.sync_to_cloud(transaction)
+            result = await self._transaction_repo.sync_to_cloud(transaction)
+            await self._transaction_repo._local.save(result, force=True)
+
+        elif change.entity_type == "planned_template":
+            server = await self._planned_repo._cloud.get_by_id(change.entity_id)
+            data["version"] = (server.version if server else 0) + 1
+            template = self._deserialize_planned(data)
+            result = await self._planned_repo.sync_to_cloud(template)
+            await self._planned_repo._local.save(result)
+
+        elif change.entity_type == "sheet":
+            sheet = self._deserialize_sheet(data)
+            result = await self._sheet_repo.sync_to_cloud(sheet)
+            await self._sheet_repo._local.save(result)
+
+        # Dequeue after successful push to prevent re-push on crash recovery
+        await self._queue.dequeue(change.id)
 
     async def _resolve_by_timestamp(self, change: PendingChange) -> None:
         """Resolve conflict by comparing timestamps."""
@@ -424,16 +522,18 @@ class SyncService(QObject):
         )
 
         if local_modified and server_modified:
+            from datetime import timezone
             if isinstance(local_modified, str):
                 local_modified = datetime.fromisoformat(local_modified)
             if isinstance(server_modified, str):
                 server_modified = datetime.fromisoformat(server_modified)
 
-            # Normalize to naive datetimes for comparison (strip timezone info)
-            if hasattr(local_modified, 'tzinfo') and local_modified.tzinfo is not None:
-                local_modified = local_modified.replace(tzinfo=None)
-            if hasattr(server_modified, 'tzinfo') and server_modified.tzinfo is not None:
-                server_modified = server_modified.replace(tzinfo=None)
+            # Normalize both timestamps to UTC for correct cross-timezone comparison.
+            # Naive datetimes (no tzinfo) are assumed to be UTC already.
+            if local_modified.tzinfo is not None:
+                local_modified = local_modified.astimezone(timezone.utc).replace(tzinfo=None)
+            if server_modified.tzinfo is not None:
+                server_modified = server_modified.astimezone(timezone.utc).replace(tzinfo=None)
 
             if local_modified > server_modified:
                 await self._force_push(change)
@@ -453,9 +553,67 @@ class SyncService(QObject):
             elif change.entity_type == "planned_template":
                 return await self._planned_repo._cloud.get_by_id(change.entity_id)
             elif change.entity_type == "sheet":
-                return await self._sheet_repo._cloud.get_by_name(str(change.entity_id))
+                return await self._sheet_repo._cloud.get_by_id(change.entity_id)
         except Exception:
             return None
+
+    def _is_same_content(self, change: PendingChange, server_entity: Any) -> bool:
+        """Check if a queued change has the same content as the server entity.
+
+        Compares all fields except version/timestamps to detect phantom conflicts
+        (where the content is identical but versions diverged due to a lost response).
+        """
+        try:
+            from decimal import Decimal as _Decimal
+            data = json.loads(change.payload)
+            if change.entity_type == "transaction":
+                # Compare content fields (ignore version, created_at, modified_at, modified_by)
+                content_fields = [
+                    "description", "amount", "type", "status", "sheet",
+                    "category", "party", "notes", "reference", "activity",
+                ]
+                for field in content_fields:
+                    local_val = data.get(field, "") or ""
+                    server_val = getattr(server_entity, field, "") or ""
+                    # Normalize amounts to avoid "100" != "100.00"
+                    if field == "amount":
+                        try:
+                            if _Decimal(str(local_val)) != _Decimal(str(server_val)):
+                                return False
+                            continue
+                        except Exception:
+                            pass
+                    if str(local_val) != str(server_val):
+                        return False
+                # Compare date separately (may be string vs date)
+                local_date = data.get("date", "")
+                if isinstance(local_date, str) and local_date:
+                    local_date = local_date[:10]  # YYYY-MM-DD
+                server_date = str(server_entity.date) if server_entity.date else ""
+                return local_date == server_date
+
+            elif change.entity_type == "planned_template":
+                content_fields = [
+                    "description", "amount", "type", "frequency",
+                    "target_sheet", "category", "party", "activity",
+                ]
+                for field in content_fields:
+                    local_val = data.get(field, "") or ""
+                    server_val = getattr(server_entity, field, "") or ""
+                    if field == "amount":
+                        try:
+                            if _Decimal(str(local_val)) != _Decimal(str(server_val)):
+                                return False
+                            continue
+                        except Exception:
+                            pass
+                    if str(local_val) != str(server_val):
+                        return False
+                return True
+
+        except Exception:
+            return False
+        return False
 
     async def _update_pending_count(self) -> None:
         """Update and emit pending count if changed."""
@@ -463,6 +621,11 @@ class SyncService(QObject):
         if count != self._last_pending_count:
             self._last_pending_count = count
             self.pending_count_changed.emit(count)
+
+    @property
+    def is_syncing(self) -> bool:
+        """Whether a sync operation is currently in progress."""
+        return self._is_syncing
 
     async def get_pending_count(self) -> int:
         """Get current pending count."""
@@ -483,10 +646,10 @@ class SyncService(QObject):
         if use_local:
             # Force-push local version with updated version number to
             # avoid hitting the same conflict again on retry.
+            # _force_push dequeues the change after successful push.
             change = await self._queue.get_by_id(change_id)
             if change:
                 await self._force_push(change)
-                await self._queue.dequeue(change_id)
         else:
             # Discard local change and refresh from cloud
             await self._queue.resolve_conflict(change_id, use_local=False)
