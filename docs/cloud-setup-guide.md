@@ -135,6 +135,12 @@ CREATE TABLE categories (
 
 CREATE INDEX idx_categories_type ON categories(type);
 
+-- Activity notes table (per-activity context/explanations)
+CREATE TABLE activity_notes (
+    activity TEXT PRIMARY KEY,
+    notes TEXT NOT NULL
+);
+
 -- Row Level Security (enable for multi-user)
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE planned_templates ENABLE ROW LEVEL SECURITY;
@@ -142,6 +148,7 @@ ALTER TABLE sheets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_notes ENABLE ROW LEVEL SECURITY;
 
 -- Policies: Allow all authenticated users full access
 -- (Adjust these if you need more granular permissions)
@@ -151,6 +158,7 @@ CREATE POLICY "Full access" ON sheets FOR ALL USING (true);
 CREATE POLICY "Full access" ON attachments FOR ALL USING (true);
 CREATE POLICY "Full access" ON audit_log FOR ALL USING (true);
 CREATE POLICY "Full access" ON categories FOR ALL USING (true);
+CREATE POLICY "Full access" ON activity_notes FOR ALL USING (true);
 ```
 
 ---
@@ -327,6 +335,22 @@ ALTER TABLE planned_templates ADD COLUMN IF NOT EXISTS activity TEXT;
 ```
 
 These columns are optional (`TEXT`, nullable) so existing data is unaffected.
+
+### Activity Notes Table
+
+If you set up your database before activity notes were added to the cloud, run:
+
+```sql
+-- Add activity notes table (for activity context/explanations)
+CREATE TABLE IF NOT EXISTS activity_notes (
+    activity TEXT PRIMARY KEY,
+    notes TEXT NOT NULL
+);
+ALTER TABLE activity_notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Full access" ON activity_notes FOR ALL USING (true);
+```
+
+Note: Fidra also creates this table automatically on connect, so this step is optional.
 
 ---
 

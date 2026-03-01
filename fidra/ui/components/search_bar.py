@@ -55,13 +55,14 @@ class SearchBar(QWidget):
         self.search_input.textChanged.connect(self._on_text_changed)
         self.search_input.setToolTip(
             "Boolean search syntax:\n"
-            "  • coffee - simple term\n"
+            '  • coffee - simple term\n'
+            '  • "Social Event" - exact phrase\n'
             "  • coffee AND fuel - both terms\n"
             "  • coffee OR fuel - either term\n"
             "  • NOT pending - exclude term\n"
             "  • (coffee OR fuel) AND car - grouping\n"
             "\n"
-            "Searches: description, amount, type, status, category, party, notes"
+            "Searches: description, amount, type, status, category, party, activity, notes"
         )
         layout.addWidget(self.search_input, 1)
 

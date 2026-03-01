@@ -121,6 +121,7 @@ class ViewTransactionDialog(QDialog):
         grid.addLayout(self._row("Category", self._transaction.category or "-")[0])
         grid.addLayout(self._row("Party", self._transaction.party or "-")[0])
         grid.addLayout(self._row("Reference", self._transaction.reference or "-")[0])
+        grid.addLayout(self._row("Activity", self._transaction.activity or "-")[0])
         grid.addLayout(self._row("Notes", self._transaction.notes or "-")[0])
         self._attachments_row, self._attachments_value = self._row("Attachments", "None")
         grid.addLayout(self._attachments_row)
@@ -228,6 +229,7 @@ class ViewTransactionDialog(QDialog):
         category = self._transaction.category or "-"
         party = self._transaction.party or "-"
         reference = self._transaction.reference or "-"
+        activity = self._transaction.activity or "-"
         notes = self._transaction.notes or "-"
 
         attachments_text = "None"
@@ -245,6 +247,7 @@ class ViewTransactionDialog(QDialog):
             f"Category: {category}\n"
             f"Party: {party}\n"
             f"Reference: {reference}\n"
+            f"Activity: {activity}\n"
             f"Notes: {notes}\n"
             f"Attachments: {attachments_text}"
         )

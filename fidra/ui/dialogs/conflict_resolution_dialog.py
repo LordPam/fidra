@@ -1,7 +1,7 @@
 """Conflict resolution dialog for handling version conflicts."""
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -14,44 +14,82 @@ from PySide6.QtWidgets import (
     QGridLayout,
 )
 
-from fidra.domain.models import Transaction
+from fidra.domain.models import PlannedTemplate, Transaction
 
 
 class ConflictResolution(Enum):
     """Resolution choice for version conflicts."""
     KEEP_MINE = "keep_mine"
     USE_THEIRS = "use_theirs"
-    CANCEL = "cancel"
+
+
+def _build_fields(
+    local: Union[Transaction, PlannedTemplate],
+    db: Union[Transaction, PlannedTemplate],
+) -> list[tuple[str, str, str]]:
+    """Build comparison fields based on entity type."""
+    if isinstance(local, Transaction):
+        return [
+            ("Description", local.description, db.description),
+            ("Amount", f"£{local.amount:,.2f}", f"£{db.amount:,.2f}"),
+            ("Date", local.date.strftime("%d %b %Y"), db.date.strftime("%d %b %Y")),
+            ("Type", local.type.value.title(), db.type.value.title()),
+            ("Status", local.status.value.title(), db.status.value.title()),
+            ("Category", local.category or "-", db.category or "-"),
+            ("Party", local.party or "-", db.party or "-"),
+            ("Reference", local.reference or "-", db.reference or "-"),
+            ("Activity", local.activity or "-", db.activity or "-"),
+            ("Notes", local.notes or "-", db.notes or "-"),
+        ]
+    elif isinstance(local, PlannedTemplate):
+        return [
+            ("Description", local.description, db.description),
+            ("Amount", f"£{local.amount:,.2f}", f"£{db.amount:,.2f}"),
+            ("Start Date", local.start_date.strftime("%d %b %Y"), db.start_date.strftime("%d %b %Y")),
+            ("Frequency", local.frequency.value.title(), db.frequency.value.title()),
+            ("Target Sheet", local.target_sheet or "-", db.target_sheet or "-"),
+            ("Category", local.category or "-", db.category or "-"),
+            ("Party", local.party or "-", db.party or "-"),
+            ("Activity", local.activity or "-", db.activity or "-"),
+        ]
+    return []
 
 
 class ConflictResolutionDialog(QDialog):
     """Dialog for resolving version conflicts between local and database versions.
 
     Shows both versions side by side and lets the user choose how to proceed.
+    Supports Transaction and PlannedTemplate entities.
     """
 
     def __init__(
         self,
-        local_transaction: Transaction,
-        db_transaction: Transaction,
+        local_entity: Union[Transaction, PlannedTemplate],
+        db_entity: Union[Transaction, PlannedTemplate],
         parent=None
     ):
         """Initialize the conflict resolution dialog.
 
         Args:
-            local_transaction: The user's local version (their edits)
-            db_transaction: The current database version (someone else's changes)
+            local_entity: The user's local version (their edits)
+            db_entity: The current database version (someone else's changes)
             parent: Parent widget
         """
         super().__init__(parent)
-        self._local = local_transaction
-        self._db = db_transaction
-        self._resolution = ConflictResolution.CANCEL
+        self._local = local_entity
+        self._db = db_entity
+        self._resolution = ConflictResolution.USE_THEIRS  # Safe default
 
+        entity_label = "planned template" if isinstance(local_entity, PlannedTemplate) else "transaction"
         self.setWindowTitle("Conflict Detected")
         self.setModal(True)
         self.setMinimumWidth(600)
+        # Disable close button — user must choose a resolution
+        self.setWindowFlags(
+            self.windowFlags() & ~Qt.WindowCloseButtonHint
+        )
 
+        self._entity_label = entity_label
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -62,7 +100,7 @@ class ConflictResolutionDialog(QDialog):
 
         # Warning header
         header = QLabel(
-            "This transaction was modified by someone else while you were editing it."
+            f"This {self._entity_label} was modified by someone else while you were editing it."
         )
         header.setObjectName("conflict_header")
         header.setWordWrap(True)
@@ -70,7 +108,7 @@ class ConflictResolutionDialog(QDialog):
         layout.addWidget(header)
 
         subheader = QLabel(
-            "Please choose which version to keep, or cancel to review your changes."
+            "Please choose which version to keep. Differences are highlighted."
         )
         subheader.setWordWrap(True)
         subheader.setStyleSheet("color: #6b7280;")
@@ -99,17 +137,9 @@ class ConflictResolutionDialog(QDialog):
         comp_layout.addWidget(yours_header, 0, 1)
         comp_layout.addWidget(theirs_header, 0, 2)
 
-        # Compare fields
+        # Compare fields — built dynamically based on entity type
         row = 1
-        fields = [
-            ("Description", self._local.description, self._db.description),
-            ("Amount", f"£{self._local.amount:,.2f}", f"£{self._db.amount:,.2f}"),
-            ("Date", self._local.date.strftime("%d %b %Y"), self._db.date.strftime("%d %b %Y")),
-            ("Type", self._local.type.value.title(), self._db.type.value.title()),
-            ("Status", self._local.status.value.title(), self._db.status.value.title()),
-            ("Category", self._local.category or "-", self._db.category or "-"),
-            ("Party", self._local.party or "-", self._db.party or "-"),
-        ]
+        fields = _build_fields(self._local, self._db)
 
         for field_name, local_val, db_val in fields:
             is_different = local_val != db_val
@@ -153,10 +183,6 @@ class ConflictResolutionDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(12)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self._on_cancel)
-        button_layout.addWidget(cancel_btn)
-
         button_layout.addStretch()
 
         use_theirs_btn = QPushButton("Use Database Version")
@@ -182,11 +208,6 @@ class ConflictResolutionDialog(QDialog):
         self._resolution = ConflictResolution.USE_THEIRS
         self.accept()
 
-    def _on_cancel(self) -> None:
-        """User cancelled - wants to review."""
-        self._resolution = ConflictResolution.CANCEL
-        self.reject()
-
     def get_resolution(self) -> ConflictResolution:
         """Get the user's resolution choice.
 
@@ -194,17 +215,3 @@ class ConflictResolutionDialog(QDialog):
             The chosen resolution
         """
         return self._resolution
-
-    def get_resolved_transaction(self) -> Optional[Transaction]:
-        """Get the transaction to save based on resolution.
-
-        Returns:
-            Transaction to save, or None if cancelled
-        """
-        if self._resolution == ConflictResolution.KEEP_MINE:
-            # Update version to current DB version + 1
-            return self._local.with_updates(version=self._db.version + 1)
-        elif self._resolution == ConflictResolution.USE_THEIRS:
-            return self._db
-        else:
-            return None

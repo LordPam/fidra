@@ -51,6 +51,7 @@ class TransactionTable(QTableView):
     convert_to_actual_requested = Signal(list)  # User wants to convert planned to actual
     skip_instance_requested = Signal(list)  # User wants to skip planned instance(s)
     delete_template_requested = Signal(list)  # User wants to delete planned template(s)
+    edit_template_requested = Signal(Transaction)  # User wants to edit planned template
 
     def __init__(self, parent=None):
         """Initialize the transaction table.
@@ -101,6 +102,7 @@ class TransactionTable(QTableView):
             self._model.COL_CATEGORY: 95,
             self._model.COL_PARTY: 130,
             self._model.COL_REFERENCE: 100,
+            self._model.COL_ACTIVITY: 100,
             self._model.COL_SHEET: 80,
             self._model.COL_STATUS: 85,
             self._model.COL_BALANCE: 95,
@@ -115,6 +117,7 @@ class TransactionTable(QTableView):
             self._model.COL_CATEGORY: 85,    # Fits "Category" header
             self._model.COL_PARTY: 110,      # Close to description
             self._model.COL_REFERENCE: 80,   # Fits "Reference" header
+            self._model.COL_ACTIVITY: 80,   # Fits "Activity" header
             self._model.COL_SHEET: 75,
             self._model.COL_STATUS: 75,      # Fits "Approved"
             self._model.COL_BALANCE: 90,     # Fits negative amounts
@@ -195,15 +198,26 @@ class TransactionTable(QTableView):
 
         return transactions
 
+    def mousePressEvent(self, event) -> None:
+        """Clear selection when clicking empty space."""
+        index = self.indexAt(event.pos())
+        if not index.isValid():
+            self.clearSelection()
+        super().mousePressEvent(event)
+
     def _on_double_click(self, index) -> None:
         """Handle double-click to edit transaction.
 
         Args:
             index: Model index that was double-clicked
         """
+        from fidra.domain.models import ApprovalStatus
         trans = self._model.get_transaction_at(index.row())
         if trans:
-            self.edit_requested.emit(trans)
+            if trans.status == ApprovalStatus.PLANNED:
+                self.edit_template_requested.emit(trans)
+            else:
+                self.edit_requested.emit(trans)
 
     def _show_context_menu(self, position) -> None:
         """Show context menu at the given position.
@@ -223,6 +237,12 @@ class TransactionTable(QTableView):
 
         # If ALL selected are planned, show planned-specific actions
         if planned_only and len(planned_only) == len(selected):
+            # Edit Template (single planned only)
+            if len(planned_only) == 1:
+                edit_tmpl_action = QAction("Edit Template", self)
+                edit_tmpl_action.triggered.connect(lambda: self.edit_template_requested.emit(planned_only[0]))
+                menu.addAction(edit_tmpl_action)
+
             # Convert to Actual
             convert_action = QAction(f"Convert to Actual ({len(planned_only)})", self)
             convert_action.triggered.connect(lambda: self.convert_to_actual_requested.emit(planned_only))

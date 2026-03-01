@@ -166,11 +166,21 @@ class AddTransactionForm(QWidget):
 
         layout.addStretch(1)
 
-        # ===== REFERENCE =====
+        # ===== REFERENCE & ACTIVITY ROW =====
+        ref_activity_layout = QHBoxLayout()
+        ref_activity_layout.setSpacing(6)
+
         self.reference_input = QLineEdit()
-        self.reference_input.setPlaceholderText("Reference (bank statement, invoice #, etc.)")
+        self.reference_input.setPlaceholderText("Reference")
         self.reference_input.setMinimumHeight(26)
-        layout.addWidget(self.reference_input)
+        ref_activity_layout.addWidget(self.reference_input, 1)
+
+        self.activity_input = QLineEdit()
+        self.activity_input.setPlaceholderText("Activity")
+        self.activity_input.setMinimumHeight(26)
+        ref_activity_layout.addWidget(self.activity_input, 1)
+
+        layout.addLayout(ref_activity_layout)
 
         layout.addStretch(1)
 
@@ -286,6 +296,7 @@ class AddTransactionForm(QWidget):
         category = self.category_input.currentText().strip() or None
         party = self.party_input.text().strip() or None
         reference = self.reference_input.text().strip() or None
+        activity = self.activity_input.text().strip() or None
         notes = self.notes_input.text().strip() or None
 
         # Determine which sheet to use
@@ -313,6 +324,7 @@ class AddTransactionForm(QWidget):
             category=category,
             party=party,
             reference=reference,
+            activity=activity,
             notes=notes,
             status=status,
         )
@@ -354,6 +366,7 @@ class AddTransactionForm(QWidget):
         self.category_input.setCurrentIndex(0)
         self.party_input.clear()
         self.reference_input.clear()
+        self.activity_input.clear()
         self.notes_input.clear()
         self.date_edit.setDate(QDate.currentDate())
         self.amount_input.setFocus()
@@ -425,6 +438,15 @@ class AddTransactionForm(QWidget):
             install_tab_accept(self.party_input, self._party_completer)
         )
 
+        # Activity completer
+        self._activity_completer = QCompleter(self)
+        self._activity_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self._activity_completer.setFilterMode(Qt.MatchContains)
+        self.activity_input.setCompleter(self._activity_completer)
+        self._completer_filters.append(
+            install_tab_accept(self.activity_input, self._activity_completer)
+        )
+
         # Connect to transactions changes to update completers
         self._context.state.transactions.changed.connect(self._update_completer_data)
 
@@ -440,21 +462,26 @@ class AddTransactionForm(QWidget):
         if not self._context:
             return
 
-        # Extract unique descriptions and parties
+        # Extract unique descriptions, parties, and activities
         descriptions = set()
         parties = set()
+        activities = set()
 
         for t in transactions:
             if t.description:
                 descriptions.add(t.description)
             if t.party:
                 parties.add(t.party)
+            if t.activity:
+                activities.add(t.activity)
 
         # Sort alphabetically
         desc_list = sorted(descriptions, key=str.lower)
         party_list = sorted(parties, key=str.lower)
+        activity_list = sorted(activities, key=str.lower)
 
         # Update completers with QStringListModel
         from PySide6.QtCore import QStringListModel
         self._description_completer.setModel(QStringListModel(desc_list))
         self._party_completer.setModel(QStringListModel(party_list))
+        self._activity_completer.setModel(QStringListModel(activity_list))

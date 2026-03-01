@@ -366,33 +366,64 @@ QCalendarWidget {
 }
 
 QCalendarWidget QWidget#qt_calendar_navigationbar {
-    background-color: #1f1f1f;
-    border-bottom: 1px solid #404040;
+    background-color: #222222;
+    border-bottom: 1px solid #383838;
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
+    padding: 4px 8px;
+    min-height: 36px;
 }
 
 QCalendarWidget QToolButton {
     color: #e2e8f0;
     background-color: transparent;
     border: none;
-    border-radius: 6px;
-    padding: 6px 10px;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 QCalendarWidget QToolButton:hover {
-    background-color: #404040;
+    background-color: #383838;
+}
+
+QCalendarWidget QToolButton#qt_calendar_prevmonth,
+QCalendarWidget QToolButton#qt_calendar_nextmonth {
+    padding: 8px;
+    min-width: 28px;
+}
+
+QCalendarWidget QToolButton::menu-indicator {
+    subcontrol-position: right center;
+    padding-right: 4px;
 }
 
 QCalendarWidget QMenu {
     background-color: #2a2a2a;
     border: 1px solid #404040;
     border-radius: 8px;
+    padding: 4px;
+}
+
+QCalendarWidget QMenu::item {
+    padding: 8px 16px;
+    border-radius: 4px;
+}
+
+QCalendarWidget QMenu::item:selected {
+    background-color: #404040;
+    color: #e2e8f0;
 }
 
 QCalendarWidget QSpinBox {
+    background-color: #2a2a2a;
     border: 1px solid #404040;
     border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
 }
 
 QCalendarWidget QAbstractItemView {
@@ -400,24 +431,33 @@ QCalendarWidget QAbstractItemView {
     selection-background-color: #4a6fa5;
     selection-color: #ffffff;
     outline: none;
+    font-size: 12px;
+    padding: 4px;
+}
+
+QCalendarWidget QAbstractItemView:enabled {
+    color: #e2e8f0;
 }
 
 QCalendarWidget QAbstractItemView::item {
-    padding: 4px;
-    border-radius: 6px;
+    width: 32px;
+    height: 32px;
+    padding: 0px;
+    margin: 1px;
+    border-radius: 16px;
 }
 
 QCalendarWidget QAbstractItemView::item:hover {
-    background-color: #353535;
+    background-color: #383838;
 }
 
-QCalendarWidget QAbstractItemView::item:today {
-    border: 1px solid #BFA159;
-    background-color: #2e2a1f;
+QCalendarWidget QAbstractItemView::item:selected {
+    background-color: #4a6fa5;
+    color: #ffffff;
 }
 
 QCalendarWidget QAbstractItemView::item:disabled {
-    color: #666666;
+    color: #555555;
 }
 
 /* Combo box */
@@ -873,6 +913,16 @@ QProgressBar {
 QProgressBar::chunk {
     background-color: #4a6fa5;
     border-radius: 4px;
+}
+
+/* ========== ACTIVITIES TABLE ========== */
+QTableWidget#activities_table::item:hover {
+    background-color: #2e2e2e;
+}
+
+QTableWidget#activities_table::item:selected {
+    background-color: rgba(74, 111, 165, 0.25);
+    color: #e2e8f0;
 }
 
 /* ========== LABELS ========== */

@@ -288,6 +288,7 @@ class TransactionsView(QWidget):
         self.transaction_table.convert_to_actual_requested.connect(self._on_convert_to_actual_requested)
         self.transaction_table.skip_instance_requested.connect(self._on_skip_instance_requested)
         self.transaction_table.delete_template_requested.connect(self._on_delete_template_requested)
+        self.transaction_table.edit_template_requested.connect(self._edit_planned_template)
 
         # Table selection changes
         self.transaction_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
@@ -346,6 +347,10 @@ class TransactionsView(QWidget):
         # Copy to clipboard (C key)
         copy_shortcut = QShortcut(QKeySequence("C"), self)
         copy_shortcut.activated.connect(self._on_copy_to_clipboard)
+
+        # Escape to clear selection
+        escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        escape_shortcut.activated.connect(self.transaction_table.clearSelection)
 
     def _init_add_form(self) -> None:
         """Initialize add form with current sheets and sheet mode."""
@@ -893,12 +898,10 @@ class TransactionsView(QWidget):
             transactions: Transactions to duplicate
         """
         try:
-            from datetime import date as date_cls
-
             for trans in transactions:
                 # Create a new transaction based on the original
                 new_trans = Transaction.create(
-                    date=date_cls.today(),
+                    date=trans.date,
                     description=trans.description,
                     amount=trans.amount,
                     type=trans.type,
@@ -906,6 +909,8 @@ class TransactionsView(QWidget):
                     sheet=trans.sheet,
                     category=trans.category,
                     party=trans.party,
+                    reference=trans.reference,
+                    activity=trans.activity,
                     notes=trans.notes,
                 )
 

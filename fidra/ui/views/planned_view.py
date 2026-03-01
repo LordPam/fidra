@@ -4,7 +4,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 import qasync
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEvent
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QDialog,
 )
-from PySide6.QtGui import QShortcut, QKeySequence
+from PySide6.QtGui import QShortcut, QKeySequence, QMouseEvent
 
 from fidra.ui.models.planned_tree_model import PlannedTreeModel
 from fidra.ui.dialogs.add_planned_dialog import AddPlannedDialog
@@ -138,6 +138,13 @@ class PlannedView(QWidget):
         new_shortcut = QShortcut(QKeySequence.StandardKey.New, self)
         new_shortcut.activated.connect(self._on_add_clicked)
 
+        # Escape to clear selection
+        escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        escape_shortcut.activated.connect(self.tree.clearSelection)
+
+        # Click empty space in tree to deselect
+        self.tree.viewport().installEventFilter(self)
+
     def _on_edit_shortcut(self) -> None:
         """Handle E key press for editing."""
         indexes = self.tree.selectionModel().selectedIndexes()
@@ -147,6 +154,14 @@ class PlannedView(QWidget):
         item_data = self.model.item_at(indexes[0])
         if item_data and item_data.get("is_template"):
             self._on_edit_clicked()
+
+    def eventFilter(self, obj, event) -> bool:
+        """Clear tree selection when clicking empty space in viewport."""
+        if obj is self.tree.viewport() and event.type() == QEvent.Type.MouseButtonPress:
+            index = self.tree.indexAt(event.pos())
+            if not index.isValid():
+                self.tree.clearSelection()
+        return super().eventFilter(obj, event)
 
     def _connect_signals(self) -> None:
         """Connect signals to slots."""
@@ -349,10 +364,44 @@ class PlannedView(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete template: {e}")
 
-    def _on_duplicate_clicked(self) -> None:
-        """Handle duplicate button click."""
-        # TODO: Implement duplicate (create new template from existing)
-        QMessageBox.information(self, "Duplicate", "Duplicate functionality coming soon!")
+    @qasync.asyncSlot()
+    async def _on_duplicate_clicked(self) -> None:
+        """Handle duplicate button click — create a new template from the selected one."""
+        indexes = self.tree.selectionModel().selectedIndexes()
+        if not indexes:
+            return
+
+        item_data = self.model.item_at(indexes[0])
+        if not item_data:
+            return
+
+        # Get source template (from either a template or instance row)
+        template = item_data.get("template")
+        if not template:
+            return
+
+        try:
+            from fidra.domain.models import PlannedTemplate
+
+            new_template = PlannedTemplate.create(
+                start_date=template.start_date,
+                description=template.description,
+                amount=template.amount,
+                type=template.type,
+                target_sheet=template.target_sheet,
+                frequency=template.frequency,
+                category=template.category,
+                party=template.party,
+                activity=template.activity,
+                end_date=template.end_date,
+                occurrence_count=template.occurrence_count,
+            )
+
+            await self._context.planned_repo.save(new_template)
+            await self._reload_templates()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to duplicate template: {e}")
 
     @qasync.asyncSlot()
     async def _on_convert_clicked(self) -> None:

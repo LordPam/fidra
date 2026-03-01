@@ -205,6 +205,7 @@ class TestSyncNow:
         await env["trans_repo"].delete(trans.id)
 
         env["cloud_trans"].delete = AsyncMock()
+        env["cloud_trans"].delete_versioned = AsyncMock(return_value=True)
 
         service = SyncService(
             sync_queue=env["queue"],
@@ -218,7 +219,8 @@ class TestSyncNow:
 
         count = await service.sync_now()
         assert count == 1
-        env["cloud_trans"].delete.assert_called()
+        # Version-checked delete should be used when version > 0
+        env["cloud_trans"].delete_versioned.assert_called()
 
     @pytest.mark.asyncio
     async def test_sync_skipped_when_not_connected(self, sync_env):

@@ -58,6 +58,7 @@ class Transaction:
     category: Optional[str] = None
     party: Optional[str] = None
     reference: Optional[str] = None  # Bank statement reference for matching
+    activity: Optional[str] = None  # Activity/project tag for grouping related transactions
     notes: Optional[str] = None
     is_one_time_planned: Optional[bool] = None  # True for ONCE planned instances
     version: int = 1
@@ -171,6 +172,7 @@ class PlannedTemplate:
     frequency: Frequency = Frequency.ONCE  # Default to one-time
     category: Optional[str] = None
     party: Optional[str] = None
+    activity: Optional[str] = None  # Activity/project tag for grouping
     end_date: Optional[date] = None  # For recurring: when to stop
     occurrence_count: Optional[int] = None  # Alternative: stop after N occurrences
     skipped_dates: tuple[date, ...] = ()  # Instances to exclude from projections

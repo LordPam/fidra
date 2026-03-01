@@ -30,6 +30,11 @@ class SettingsStore:
         """
         self._path = path or self.DEFAULT_PATH
 
+    @property
+    def path(self) -> Path:
+        """Get the settings file path."""
+        return self._path
+
     def exists(self) -> bool:
         """Check if settings file exists (indicates not first run)."""
         return self._path.exists()
@@ -105,6 +110,16 @@ class SettingsStore:
             storage.pop("supabase", None)
 
         data["storage"] = storage
+
+        # Migrate conflict strategy: last_write_wins → ask_user
+        sync = data.get("sync", {})
+        if sync.get("conflict_strategy") == "last_write_wins":
+            sync["conflict_strategy"] = "ask_user"
+            data["sync"] = sync
+
+        # Remove activity_notes (moved from settings to database)
+        data.pop("activity_notes", None)
+
         return data
 
     def save(self, settings: AppSettings) -> None:

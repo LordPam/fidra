@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt
+from PySide6.QtGui import QColor, QFont
 
 from fidra.domain.models import PlannedTemplate, Transaction
 
@@ -299,6 +300,27 @@ class PlannedTreeModel(QAbstractItemModel):
                     return instance.type.value.capitalize()
                 elif column == self.COL_NEXT_DUE:  # Status
                     return "PLANNED"
+
+        elif role == Qt.ItemDataRole.ForegroundRole:
+            # Amber/orange text for overdue template rows
+            if item.data.get("is_template"):
+                template = item.data["template"]
+                if template.start_date < date.today():
+                    from fidra.ui.theme.engine import get_theme_engine, Theme
+                    engine = get_theme_engine()
+                    if engine.current_theme == Theme.DARK:
+                        return QColor(251, 191, 36)   # warm gold
+                    else:
+                        return QColor(217, 119, 6)    # amber/orange
+
+        elif role == Qt.ItemDataRole.FontRole:
+            # Italic for overdue template rows
+            if item.data.get("is_template"):
+                template = item.data["template"]
+                if template.start_date < date.today():
+                    font = QFont()
+                    font.setItalic(True)
+                    return font
 
         elif role == Qt.ItemDataRole.UserRole:
             # Return the full item data for access by views

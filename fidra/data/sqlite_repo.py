@@ -9,6 +9,7 @@ from typing import Optional
 from uuid import UUID
 
 from fidra.data.repository import (
+    ActivityNotesRepository,
     AttachmentRepository,
     AuditRepository,
     CategoryRepository,
@@ -64,6 +65,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 category TEXT,
                 party TEXT,
                 reference TEXT,
+                activity TEXT,
                 notes TEXT,
                 version INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -86,6 +88,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 target_sheet TEXT NOT NULL,
                 category TEXT,
                 party TEXT,
+                activity TEXT,
                 end_date TEXT,
                 occurrence_count INTEGER,
                 skipped_dates TEXT DEFAULT '[]',
@@ -143,6 +146,11 @@ class SQLiteTransactionRepository(TransactionRepository):
             );
 
             CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type);
+
+            CREATE TABLE IF NOT EXISTS activity_notes (
+                activity TEXT PRIMARY KEY,
+                notes TEXT NOT NULL
+            );
         """
         )
         await self._conn.commit()
@@ -158,6 +166,23 @@ class SQLiteTransactionRepository(TransactionRepository):
         if "reference" not in column_names:
             await self._conn.execute(
                 "ALTER TABLE transactions ADD COLUMN reference TEXT"
+            )
+            await self._conn.commit()
+
+        if "activity" not in column_names:
+            await self._conn.execute(
+                "ALTER TABLE transactions ADD COLUMN activity TEXT"
+            )
+            await self._conn.commit()
+
+        # Add activity column to planned_templates if it doesn't exist
+        async with self._conn.execute("PRAGMA table_info(planned_templates)") as cursor:
+            pt_columns = await cursor.fetchall()
+            pt_column_names = [col[1] for col in pt_columns]
+
+        if "activity" not in pt_column_names:
+            await self._conn.execute(
+                "ALTER TABLE planned_templates ADD COLUMN activity TEXT"
             )
             await self._conn.commit()
 
@@ -207,8 +232,8 @@ class SQLiteTransactionRepository(TransactionRepository):
             """
             INSERT OR REPLACE INTO transactions
             (id, date, description, amount, type, status, sheet,
-             category, party, reference, notes, version, created_at, modified_at, modified_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             category, party, reference, activity, notes, version, created_at, modified_at, modified_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(transaction.id),
@@ -221,6 +246,7 @@ class SQLiteTransactionRepository(TransactionRepository):
                 transaction.category,
                 transaction.party,
                 transaction.reference,
+                transaction.activity,
                 transaction.notes,
                 transaction.version,
                 transaction.created_at.isoformat(),
@@ -266,11 +292,16 @@ class SQLiteTransactionRepository(TransactionRepository):
 
     def _row_to_transaction(self, row: aiosqlite.Row) -> Transaction:
         """Convert database row to Transaction model."""
-        # Handle reference field which may not exist in older databases
+        # Handle fields which may not exist in older databases
         try:
             reference = row["reference"]
         except (KeyError, IndexError):
             reference = None
+
+        try:
+            activity = row["activity"]
+        except (KeyError, IndexError):
+            activity = None
 
         return Transaction(
             id=UUID(row["id"]),
@@ -283,6 +314,7 @@ class SQLiteTransactionRepository(TransactionRepository):
             category=row["category"],
             party=row["party"],
             reference=reference,
+            activity=activity,
             notes=row["notes"],
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -321,9 +353,9 @@ class SQLitePlannedRepository(PlannedRepository):
             """
             INSERT OR REPLACE INTO planned_templates
             (id, start_date, description, amount, type, frequency, target_sheet,
-             category, party, end_date, occurrence_count, skipped_dates, fulfilled_dates,
+             category, party, activity, end_date, occurrence_count, skipped_dates, fulfilled_dates,
              version, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(template.id),
@@ -335,6 +367,7 @@ class SQLitePlannedRepository(PlannedRepository):
                 template.target_sheet,
                 template.category,
                 template.party,
+                template.activity,
                 template.end_date.isoformat() if template.end_date else None,
                 template.occurrence_count,
                 json.dumps([d.isoformat() for d in template.skipped_dates]),
@@ -345,6 +378,14 @@ class SQLitePlannedRepository(PlannedRepository):
         )
         await self._conn.commit()
         return template
+
+    async def get_version(self, id: UUID) -> Optional[int]:
+        """Get current version for optimistic concurrency."""
+        async with self._conn.execute(
+            "SELECT version FROM planned_templates WHERE id = ?", (str(id),)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["version"] if row else None
 
     async def delete(self, id: UUID) -> bool:
         """Delete a planned template."""
@@ -373,6 +414,7 @@ class SQLitePlannedRepository(PlannedRepository):
             frequency=Frequency(row["frequency"]),
             category=row["category"],
             party=row["party"],
+            activity=row["activity"] if "activity" in row.keys() else None,
             end_date=date.fromisoformat(row["end_date"]) if row["end_date"] else None,
             occurrence_count=row["occurrence_count"],
             skipped_dates=skipped_dates,
@@ -690,4 +732,60 @@ class SQLiteCategoryRepository(CategoryRepository):
                 (type, name, i),
             )
 
+        await self._conn.commit()
+
+
+class SQLiteActivityNotesRepository(ActivityNotesRepository):
+    """SQLite implementation of ActivityNotesRepository."""
+
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        self._conn: Optional[aiosqlite.Connection] = None
+
+    async def connect(self) -> None:
+        """Connect to database."""
+        self._conn = await aiosqlite.connect(self._db_path)
+        self._conn.row_factory = aiosqlite.Row
+
+    async def close(self) -> None:
+        """Close database connection."""
+        if self._conn:
+            await self._conn.close()
+
+    def set_connection(self, conn: aiosqlite.Connection) -> None:
+        """Share connection from another repository."""
+        self._conn = conn
+
+    async def get_all(self) -> dict[str, str]:
+        """Get all activity notes."""
+        async with self._conn.execute(
+            "SELECT activity, notes FROM activity_notes ORDER BY activity"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return {row["activity"]: row["notes"] for row in rows}
+
+    async def save(self, activity: str, notes: str) -> None:
+        """Save notes for an activity."""
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO activity_notes (activity, notes) VALUES (?, ?)",
+            (activity, notes),
+        )
+        await self._conn.commit()
+
+    async def delete(self, activity: str) -> None:
+        """Delete notes for an activity."""
+        await self._conn.execute(
+            "DELETE FROM activity_notes WHERE activity = ?",
+            (activity,),
+        )
+        await self._conn.commit()
+
+    async def set_all(self, notes: dict[str, str]) -> None:
+        """Replace all activity notes."""
+        await self._conn.execute("DELETE FROM activity_notes")
+        for activity, text in notes.items():
+            await self._conn.execute(
+                "INSERT INTO activity_notes (activity, notes) VALUES (?, ?)",
+                (activity, text),
+            )
         await self._conn.commit()

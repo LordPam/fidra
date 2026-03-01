@@ -93,9 +93,10 @@ class CloudServerDialog(QDialog):
 
     def __init__(
         self,
-        context: "ApplicationContext",
+        context: "ApplicationContext" = None,
         server_config: Optional[CloudServerConfig] = None,
         parent=None,
+        wizard_theme: bool = False,
     ):
         super().__init__(parent)
         self._context = context
@@ -107,8 +108,85 @@ class CloudServerDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(520)
 
+        # Apply dark theme only when explicitly requested (setup wizard)
+        if wizard_theme:
+            self._apply_wizard_theme()
+
         self._setup_ui()
         self._load_current_settings()
+
+    def _apply_wizard_theme(self) -> None:
+        """Apply dark styling to match the setup wizard theme."""
+        self.setStyleSheet("""
+            QDialog {
+                background: #0D1F2F;
+            }
+            QGroupBox {
+                background: #23395B;
+                border: 1px solid #A9A9A9;
+                border-radius: 8px;
+                margin-top: 14px;
+                padding: 16px 14px 14px;
+                font-size: 13px;
+                font-weight: 600;
+                color: #D3D3D3;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 2px 10px;
+                color: #BFA159;
+            }
+            QLabel {
+                color: #D3D3D3;
+                font-size: 12px;
+                background: transparent;
+            }
+            QLineEdit {
+                background: #0D1F2F;
+                border: 1px solid #A9A9A9;
+                border-radius: 6px;
+                padding: 8px 10px;
+                font-size: 12px;
+                color: #D3D3D3;
+            }
+            QLineEdit:focus {
+                border-color: #BFA159;
+            }
+            QLineEdit::placeholder {
+                color: #A9A9A9;
+            }
+            QSpinBox {
+                background: #0D1F2F;
+                border: 1px solid #A9A9A9;
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-size: 12px;
+                color: #D3D3D3;
+            }
+            QSpinBox:focus {
+                border-color: #BFA159;
+            }
+            QPushButton {
+                background: #BFA159;
+                color: #0D1F2F;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #CDB169;
+            }
+            QPushButton:disabled {
+                background: #23395B;
+                color: #A9A9A9;
+            }
+            QDialogButtonBox QPushButton {
+                min-width: 80px;
+            }
+        """)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -295,7 +373,8 @@ class CloudServerDialog(QDialog):
                 pool_max_size=self.pool_max_spin.value(),
                 created_at=datetime.now().isoformat(),
             )
-            self._context.settings.storage.add_server(server)
+            if self._context:
+                self._context.settings.storage.add_server(server)
             self._server_config = server
         else:
             self._server_config.name = name
@@ -304,7 +383,8 @@ class CloudServerDialog(QDialog):
             self._server_config.pool_min_size = self.pool_min_spin.value()
             self._server_config.pool_max_size = self.pool_max_spin.value()
 
-        self._context.save_settings()
+        if self._context:
+            self._context.save_settings()
         self.accept()
 
     @property

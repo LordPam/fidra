@@ -1,6 +1,7 @@
 """Main application window with tab-based navigation."""
 
 import asyncio
+import json
 from datetime import date
 from enum import IntEnum
 from pathlib import Path
@@ -28,12 +29,16 @@ from PySide6.QtWidgets import (
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
 
-from fidra.domain.models import PlannedTemplate
+from fidra.domain.models import PlannedTemplate, Sheet, Transaction
 from fidra.ui.theme.engine import get_theme_engine, Theme
 from fidra.ui.views.dashboard_view import DashboardView
 from fidra.ui.views.transactions_view import TransactionsView
 from fidra.ui.views.planned_view import PlannedView
+from fidra.ui.views.activities_view import ActivitiesView
 from fidra.ui.views.reports_view import ReportsView
+from fidra.ui.dialogs.conflict_resolution_dialog import (
+    ConflictResolutionDialog, ConflictResolution,
+)
 from fidra.ui.dialogs.manage_sheets_dialog import ManageSheetsDialog
 from fidra.ui.dialogs.audit_log_dialog import AuditLogDialog
 from fidra.ui.dialogs.backup_restore_dialog import BackupRestoreDialog
@@ -53,7 +58,8 @@ class ViewIndex(IntEnum):
     DASHBOARD = 0
     TRANSACTIONS = 1
     PLANNED = 2
-    REPORTS = 3
+    ACTIVITIES = 3
+    REPORTS = 4
 
 
 class MainWindow(QMainWindow):
@@ -122,13 +128,15 @@ class MainWindow(QMainWindow):
         self.dashboard_view = DashboardView(self._ctx)
         self.transactions_view = TransactionsView(self._ctx)
         self.planned_view = PlannedView(self._ctx)
+        self.activities_view = ActivitiesView(self._ctx)
         self.reports_view = ReportsView(self._ctx)
 
         # Add views to stack
         self.stack.addWidget(self.dashboard_view)  # Index 0
         self.stack.addWidget(self.transactions_view)  # Index 1
         self.stack.addWidget(self.planned_view)  # Index 2
-        self.stack.addWidget(self.reports_view)  # Index 3
+        self.stack.addWidget(self.activities_view)  # Index 3
+        self.stack.addWidget(self.reports_view)  # Index 4
 
         layout.addWidget(self.stack, 1)
 
@@ -152,6 +160,9 @@ class MainWindow(QMainWindow):
             if self._ctx.sync_service:
                 self._ctx.sync_service.pending_count_changed.connect(
                     self.connection_indicator.set_pending_count
+                )
+                self._ctx.sync_service.conflict_detected.connect(
+                    self._on_sync_conflict_detected
                 )
 
     def _create_top_bar(self) -> QWidget:
@@ -212,6 +223,7 @@ class MainWindow(QMainWindow):
             ("Dashboard", ViewIndex.DASHBOARD),
             ("Transactions", ViewIndex.TRANSACTIONS),
             ("Planned", ViewIndex.PLANNED),
+            ("Activities", ViewIndex.ACTIVITIES),
             ("Reports", ViewIndex.REPORTS),
         ]
 
@@ -304,6 +316,9 @@ class MainWindow(QMainWindow):
         self._state.filtered_balance_mode.changed.connect(self._on_ui_state_changed)
         self._state.current_sheet.changed.connect(self._on_ui_state_changed)
 
+        # Activities view navigation
+        self.activities_view.activity_selected.connect(self._navigate_to_activity)
+
         # File watcher - reload data when database changes externally
         self._ctx.file_watcher.file_changed.connect(self._on_database_file_changed)
 
@@ -333,6 +348,15 @@ class MainWindow(QMainWindow):
             btn.setChecked(True)
 
         self.view_changed.emit(view_index)
+
+    def _navigate_to_activity(self, activity_name: str) -> None:
+        """Navigate to Transactions view filtered by an activity name.
+
+        Args:
+            activity_name: Activity to filter by
+        """
+        self.navigate_to(ViewIndex.TRANSACTIONS)
+        self.transactions_view.search_bar.search_input.setText(activity_name)
 
     def _on_transactions_changed(self, transactions: list) -> None:
         """Handle transaction list changes.
@@ -790,6 +814,89 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status_bar.showMessage(f"Error reloading database: {e}", 5000)
 
+    def _on_sync_conflict_detected(self, change_id, local_data, server_entity) -> None:
+        """Handle a sync conflict by showing the resolution dialog.
+
+        Args:
+            change_id: Queue entry ID for the conflicting change
+            local_data: Local version as a dict (from sync queue payload)
+            server_entity: Server version as a domain object
+        """
+        if isinstance(server_entity, Transaction):
+            local_entity = self._ctx.sync_service._deserialize_transaction(local_data)
+            entity_type = "transaction"
+        elif isinstance(server_entity, PlannedTemplate):
+            local_entity = self._ctx.sync_service._deserialize_planned(local_data)
+            entity_type = "planned_template"
+        else:
+            # For unsupported entity types, fall back to server wins
+            asyncio.ensure_future(
+                self._ctx.sync_service.resolve_conflict_with_choice(
+                    change_id, use_local=False,
+                    entity_type=getattr(server_entity, '__class__', type(server_entity)).__name__.lower(),
+                )
+            )
+            return
+
+        dialog = ConflictResolutionDialog(local_entity, server_entity, parent=self)
+        dialog.exec()
+
+        resolution = dialog.get_resolution()
+        use_local = resolution == ConflictResolution.KEEP_MINE
+        asyncio.ensure_future(self._resolve_conflict(
+            change_id, use_local=use_local,
+            entity_type=entity_type, entity_id=server_entity.id,
+        ))
+
+    async def _resolve_conflict(
+        self, change_id, use_local: bool, entity_type: str, entity_id
+    ) -> None:
+        """Resolve a sync conflict and reload data."""
+        await self._ctx.sync_service.resolve_conflict_with_choice(
+            change_id, use_local,
+            entity_type=entity_type, entity_id=entity_id,
+        )
+        # Reload data so the UI reflects the resolution
+        await self._ctx._load_initial_data()
+
+    def _show_unresolved_conflict_banner(self) -> None:
+        """Show a persistent banner for unresolved sync conflicts."""
+        self.notification_banner.show_warning(
+            "You have unresolved sync conflicts. Changes won't sync until resolved.",
+            action_text="Resolve",
+            action_callback=self._on_resolve_conflicts_clicked,
+        )
+
+    @qasync.asyncSlot()
+    async def _on_resolve_conflicts_clicked(self) -> None:
+        """Re-show the conflict dialog for the first unresolved conflict."""
+        if not self._ctx.sync_queue:
+            return
+        conflicts = await self._ctx.sync_queue.get_conflicts()
+        if not conflicts:
+            return
+        conflict = conflicts[0]
+        server_entity = await self._ctx.sync_service._fetch_server_entity(conflict)
+        if server_entity is None:
+            # Server entity gone — auto-resolve by discarding local change
+            await self._ctx.sync_service.resolve_conflict_with_choice(
+                conflict.id, use_local=False,
+                entity_type=conflict.entity_type, entity_id=conflict.entity_id,
+            )
+            await self._ctx._load_initial_data()
+            return
+        local_data = json.loads(conflict.payload)
+        self._on_sync_conflict_detected(conflict.id, local_data, server_entity)
+
+    @qasync.asyncSlot()
+    async def check_unresolved_conflicts(self) -> None:
+        """Check for unresolved conflicts on startup and show banner if any."""
+        if not self._ctx.sync_queue:
+            return
+        conflicts = await self._ctx.sync_queue.get_conflicts()
+        if conflicts:
+            self._show_unresolved_conflict_banner()
+
     @qasync.asyncSlot()
     async def check_opening_balance(self) -> None:
         """Check first-run conditions and prompt user as needed.
@@ -798,6 +905,7 @@ class MainWindow(QMainWindow):
         Checks in order:
         1. Profile setup (if name is empty)
         2. Opening balance (if database is empty)
+        3. Unresolved sync conflicts
         """
         # First, check if profile needs to be set up
         # Skip if setup wizard was completed (first_run_complete=True) or if name exists
@@ -808,6 +916,10 @@ class MainWindow(QMainWindow):
         transactions = self._state.transactions.value
         if not transactions:
             await self._prompt_opening_balance()
+
+        # Check for unresolved sync conflicts (after short delay)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(2000, self.check_unresolved_conflicts)
 
     def _prompt_profile_setup(self) -> None:
         """Show the profile setup dialog for first-run."""
@@ -869,6 +981,7 @@ class MainWindow(QMainWindow):
             cloud_servers=cloud_servers,
             active_server_id=active_server_id,
             parent=self,
+            mode="new_window",
         )
 
         if chooser.exec():

@@ -5,12 +5,16 @@ and provides them to the UI layer.
 """
 
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
+logger = logging.getLogger(__name__)
+
 from fidra.data.factory import create_repositories
 from fidra.data.repository import (
+    ActivityNotesRepository,
     AttachmentRepository,
     AuditRepository,
     CategoryRepository,
@@ -79,6 +83,10 @@ class ApplicationContext:
         self.sync_service: Optional["SyncService"] = None
         self.change_listener = None  # ChangeListener for real-time LISTEN/NOTIFY
 
+        # Buffered remote changes during sync + post-sync cooldown
+        self._buffered_remote_changes: set[str] = set()
+        self._sync_cooldown_until: float = 0.0
+
         # Repositories (initialized in initialize())
         self.transaction_repo: Optional[TransactionRepository] = None
         self.planned_repo: Optional[PlannedRepository] = None
@@ -86,6 +94,7 @@ class ApplicationContext:
         self.audit_repo: Optional[AuditRepository] = None
         self.attachment_repo: Optional[AttachmentRepository] = None
         self.category_repo: Optional[CategoryRepository] = None
+        self.activity_notes_repo: Optional[ActivityNotesRepository] = None
 
         # Services
         self.attachment_service: Optional[Union[AttachmentService, "CloudAttachmentService"]] = None
@@ -138,7 +147,7 @@ class ApplicationContext:
             (
                 self.transaction_repo, self.planned_repo, self.sheet_repo,
                 self.audit_repo, self.attachment_repo, self.category_repo,
-                self.sync_queue,
+                self.activity_notes_repo, self.sync_queue,
             ) = await create_repositories(
                 backend,
                 cloud_connection=self._cloud_connection,
@@ -155,6 +164,9 @@ class ApplicationContext:
             # Migrate categories from settings to database if empty
             await self._migrate_categories_to_db()
 
+            # Migrate activity notes from settings to database if empty
+            await self._migrate_activity_notes_to_db()
+
             # Create cloud attachment service
             user = self.settings.profile.initials or self.settings.profile.name or "System"
             self.audit_service = AuditService(
@@ -168,11 +180,14 @@ class ApplicationContext:
             (
                 self.transaction_repo, self.planned_repo, self.sheet_repo,
                 self.audit_repo, self.attachment_repo, self.category_repo,
-                _,  # No sync queue for SQLite
+                self.activity_notes_repo, _,  # No sync queue for SQLite
             ) = await create_repositories(backend, self._db_path)
 
             # Migrate categories from settings to database if empty
             await self._migrate_categories_to_db()
+
+            # Migrate activity notes from settings to database if empty
+            await self._migrate_activity_notes_to_db()
 
             # Create local attachment service
             user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -204,6 +219,7 @@ class ApplicationContext:
             sheet_repo=self.sheet_repo,
             category_repo=self.category_repo,
             connection_state=self.connection_state,
+            activity_notes_repo=self.activity_notes_repo,
             conflict_strategy=strategy,
             sync_interval_ms=sync_settings.sync_interval_seconds * 1000,
         )
@@ -212,9 +228,7 @@ class ApplicationContext:
         self.sync_service.pending_count_changed.connect(
             lambda count: self.state.pending_sync_count.set(count)
         )
-        self.sync_service.sync_completed.connect(
-            lambda _: self.state.last_sync_time.set(datetime.now())
-        )
+        self.sync_service.sync_completed.connect(self._on_sync_completed)
 
         # Trigger immediate sync and restart listener when connection is restored
         def on_status_changed(status: ConnectionStatus):
@@ -255,8 +269,45 @@ class ApplicationContext:
         )
         await self.change_listener.start()
 
+    def _on_sync_completed(self, count: int) -> None:
+        """Handle sync completion: set cooldown and replay buffered changes."""
+        import time
+
+        self.state.last_sync_time.set(datetime.now())
+
+        if count > 0:
+            # Set a 2-second cooldown to ignore self-triggered NOTIFY events
+            self._sync_cooldown_until = time.monotonic() + 2.0
+
+        # Replay any changes that were buffered during sync
+        if self._buffered_remote_changes:
+            buffered = self._buffered_remote_changes.copy()
+            self._buffered_remote_changes.clear()
+            logger.debug(f"Replaying buffered remote changes: {buffered}")
+            # Delay replay past the cooldown window so genuine remote changes
+            # (vs self-triggered ones) get processed. If they were self-triggered,
+            # the cooldown will filter them. If they were genuine, we want them.
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(
+                2500,
+                lambda: asyncio.ensure_future(self._on_remote_tables_changed(buffered)),
+            )
+
     async def _on_remote_tables_changed(self, changed_tables: set) -> None:
         """Handle remote data changes detected via LISTEN/NOTIFY."""
+        # Buffer changes while sync is in progress — they'll be replayed when sync completes
+        if self.sync_service and self.sync_service.is_syncing:
+            logger.debug(f"Buffering remote changes during sync: {changed_tables}")
+            self._buffered_remote_changes.update(changed_tables)
+            return
+
+        # Skip notifications that arrive within the post-sync cooldown window
+        # (these are almost certainly self-triggered by our own push)
+        import time
+        if time.monotonic() < self._sync_cooldown_until:
+            logger.debug(f"Ignoring self-triggered notification: {changed_tables}")
+            return
+
         for attempt in range(2):
             try:
                 if "transactions" in changed_tables and hasattr(self.transaction_repo, 'refresh_from_cloud'):
@@ -267,6 +318,8 @@ class ApplicationContext:
                     await self.sheet_repo.refresh_from_cloud()
                 if "categories" in changed_tables and hasattr(self.category_repo, 'refresh_from_cloud'):
                     await self.category_repo.refresh_from_cloud()
+                if "activity_notes" in changed_tables and hasattr(self.activity_notes_repo, 'refresh_from_cloud'):
+                    await self.activity_notes_repo.refresh_from_cloud()
 
                 # Reload state from refreshed caches
                 await self._load_initial_data()
@@ -310,6 +363,8 @@ class ApplicationContext:
             self.sheet_repo._local._conn = new_conn
         if hasattr(self.category_repo, '_local'):
             self.category_repo._local._conn = new_conn
+        if hasattr(self.activity_notes_repo, '_local'):
+            self.activity_notes_repo._local._conn = new_conn
 
         print("[CACHE] Local cache connection reconnected")
 
@@ -325,6 +380,8 @@ class ApplicationContext:
                 await self.planned_repo.refresh_from_cloud()
                 await self.sheet_repo.refresh_from_cloud()
                 await self.category_repo.refresh_from_cloud()
+                if hasattr(self.activity_notes_repo, 'refresh_from_cloud'):
+                    await self.activity_notes_repo.refresh_from_cloud()
                 print("[CACHE] Cache refresh complete")
             except Exception as e:
                 print(f"[CACHE] Cache refresh failed: {e}")
@@ -423,6 +480,13 @@ class ApplicationContext:
                     print("Warning: Connection state stop timed out")
                 self.connection_state = None
 
+            # Close local cache connections (SQLite cache used by caching repos)
+            if self.transaction_repo and hasattr(self.transaction_repo, 'close'):
+                try:
+                    await asyncio.wait_for(self.transaction_repo.close(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
             # Close cloud connection (uses timeout with terminate() fallback)
             if self._cloud_connection:
                 await self._cloud_connection.close(timeout=2.0)
@@ -448,11 +512,12 @@ class ApplicationContext:
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
             self.audit_repo, self.attachment_repo, self.category_repo,
-            _,  # No sync queue for SQLite
+            self.activity_notes_repo, _,  # No sync queue for SQLite
         ) = await create_repositories("sqlite", self._db_path)
 
         # Migrate categories from settings to database if empty
         await self._migrate_categories_to_db()
+        await self._migrate_activity_notes_to_db()
 
         # Recreate services with new repos
         user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -519,7 +584,7 @@ class ApplicationContext:
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
             self.audit_repo, self.attachment_repo, self.category_repo,
-            self.sync_queue,
+            self.activity_notes_repo, self.sync_queue,
         ) = await create_repositories(
             "cloud",
             cloud_connection=self._cloud_connection,
@@ -535,6 +600,7 @@ class ApplicationContext:
 
         # Migrate categories from settings to database if empty
         await self._migrate_categories_to_db()
+        await self._migrate_activity_notes_to_db()
 
         # Recreate services
         user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -547,6 +613,9 @@ class ApplicationContext:
 
         # Reload all data
         await self._load_initial_data()
+
+        # Restore UI state from settings
+        self._restore_ui_state()
 
         # Save settings
         self.save_settings()
@@ -610,6 +679,36 @@ class ApplicationContext:
 
         if settings_expense:
             await self.category_repo.set_all("expense", settings_expense)
+
+    async def _migrate_activity_notes_to_db(self) -> None:
+        """Migrate activity notes from settings JSON to database if database is empty.
+
+        Reads the raw JSON file to find activity_notes that were stripped
+        during settings migration (the field no longer exists on AppSettings).
+        """
+        if not self.activity_notes_repo:
+            return
+
+        # Check if database already has notes
+        existing_notes = await self.activity_notes_repo.get_all()
+        if existing_notes:
+            return
+
+        # Read raw JSON to find old activity_notes before they were stripped
+        import json
+        settings_path = self.settings_store.path
+        if not settings_path.exists():
+            return
+
+        try:
+            raw = json.loads(settings_path.read_text())
+            notes = raw.get("activity_notes")
+            if notes and isinstance(notes, dict):
+                for activity, text in notes.items():
+                    if text and text.strip():
+                        await self.activity_notes_repo.save(activity, text.strip())
+        except Exception:
+            pass
 
     async def get_categories(self, type: str) -> list[str]:
         """Get categories for a transaction type.

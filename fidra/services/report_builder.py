@@ -369,13 +369,14 @@ class ReportBuilder:
         balances = self.balance_service.compute_running_balances(transactions)
 
         # Build table
-        lines.append("| Date | Description | Amount | Party | Category | Balance |")
-        lines.append("|------|-------------|--------|-------|----------|---------|")
+        lines.append("| Date | Description | Amount | Party | Category | Activity | Balance |")
+        lines.append("|------|-------------|--------|-------|----------|----------|---------|")
 
         for trans in transactions:
             date_str = trans.date.strftime('%Y-%m-%d')
             category = trans.category or '-'
             party = trans.party or '-'
+            activity = trans.activity or '-'
             balance = balances.get(str(trans.id), Decimal(0))
 
             # Format amount with +/- sign
@@ -386,7 +387,7 @@ class ReportBuilder:
 
             lines.append(
                 f"| {date_str} | {trans.description} | {amount_str} | "
-                f"{party} | {category} | £{balance:,.2f} |"
+                f"{party} | {category} | {activity} | £{balance:,.2f} |"
             )
 
         lines.append("")
