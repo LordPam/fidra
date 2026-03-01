@@ -4,11 +4,14 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+import qasync
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent
+from PySide6.QtGui import QFont, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
+    QFrame,
     QHeaderView,
     QLabel,
+    QPlainTextEdit,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -34,9 +37,11 @@ class ActivitiesView(QWidget):
     def __init__(self, context: "ApplicationContext", parent=None):
         super().__init__(parent)
         self._context = context
+        self._activity_notes: dict[str, str] = {}
         self._setup_ui()
         self._connect_signals()
         self._update_summary()
+        self._load_notes_from_repo()
 
     def _setup_ui(self) -> None:
         """Set up the UI layout."""
@@ -73,6 +78,35 @@ class ActivitiesView(QWidget):
 
         layout.addWidget(self.table, 1)
 
+        # Activity notes detail panel
+        self.notes_panel = QFrame()
+        self.notes_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        notes_layout = QVBoxLayout(self.notes_panel)
+        notes_layout.setContentsMargins(12, 8, 12, 8)
+        notes_layout.setSpacing(4)
+
+        self.notes_label = QLabel()
+        bold_font = QFont()
+        bold_font.setBold(True)
+        self.notes_label.setFont(bold_font)
+        notes_layout.addWidget(self.notes_label)
+
+        self.notes_edit = QPlainTextEdit()
+        self.notes_edit.setPlaceholderText(
+            "Add context for this activity\u2019s outcomes..."
+        )
+        self.notes_edit.setMaximumHeight(100)
+        notes_layout.addWidget(self.notes_edit)
+
+        layout.addWidget(self.notes_panel)
+        self.notes_panel.hide()
+
+        self._current_notes_activity: str | None = None
+        self._notes_save_timer = QTimer(self)
+        self._notes_save_timer.setSingleShot(True)
+        self._notes_save_timer.setInterval(500)
+        self._notes_save_timer.timeout.connect(self._persist_notes_async)
+
         # Empty state label (shown when no activities)
         self.empty_label = QLabel(
             "No activities yet \u2014 tag transactions with an activity to track them here."
@@ -93,6 +127,34 @@ class ActivitiesView(QWidget):
             self._on_data_changed
         )
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
+        self.table.cellClicked.connect(self._on_row_clicked)
+        self.notes_edit.textChanged.connect(self._on_notes_text_changed)
+
+        # Escape to clear selection and hide notes panel
+        escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        escape_shortcut.activated.connect(self._on_deselect)
+
+        # Click empty space in table to deselect
+        self.table.viewport().installEventFilter(self)
+
+    def _on_deselect(self) -> None:
+        """Clear table selection and hide the notes panel."""
+        self._notes_save_timer.stop()
+        self._save_notes_for_activity(
+            self._current_notes_activity,
+            self.notes_edit.toPlainText().strip(),
+        )
+        self._current_notes_activity = None
+        self.table.clearSelection()
+        self.notes_panel.hide()
+
+    def eventFilter(self, obj, event) -> bool:
+        """Clear selection when clicking empty space in viewport."""
+        if obj is self.table.viewport() and event.type() == QEvent.Type.MouseButtonPress:
+            index = self.table.indexAt(event.pos())
+            if not index.isValid():
+                self._on_deselect()
+        return super().eventFilter(obj, event)
 
     def _on_data_changed(self, *args) -> None:
         """Handle transactions or planned templates change."""
@@ -271,6 +333,75 @@ class ActivitiesView(QWidget):
         elif net < 0:
             item.setForeground(Qt.GlobalColor.red)
         return item
+
+    def _on_row_clicked(self, row: int, column: int) -> None:
+        """Handle single-click to show the notes panel for the selected activity."""
+        name_item = self.table.item(row, 0)
+        if not name_item:
+            self.notes_panel.hide()
+            return
+
+        activity_name = name_item.text()
+        if activity_name == "Total":
+            self.notes_panel.hide()
+            return
+
+        # Save notes for previously selected activity before switching
+        self._notes_save_timer.stop()
+        self._save_notes_for_activity(
+            self._current_notes_activity,
+            self.notes_edit.toPlainText().strip(),
+        )
+
+        self._current_notes_activity = activity_name
+        self.notes_label.setText(f"Notes — {activity_name}")
+
+        # Load existing notes from cached dict
+        notes = self._activity_notes.get(activity_name, "")
+        self.notes_edit.blockSignals(True)
+        self.notes_edit.setPlainText(notes)
+        self.notes_edit.blockSignals(False)
+
+        self.notes_panel.show()
+
+    def _on_notes_text_changed(self) -> None:
+        """Debounce save on text edits."""
+        self._notes_save_timer.start()
+
+    @qasync.asyncSlot()
+    async def _load_notes_from_repo(self) -> None:
+        """Load all activity notes from the repository."""
+        repo = self._context.activity_notes_repo
+        if repo:
+            self._activity_notes = await repo.get_all()
+
+    @qasync.asyncSlot()
+    async def _persist_notes_async(self) -> None:
+        """Debounced save: persist notes for the currently selected activity."""
+        if self._current_notes_activity:
+            await self._do_save_notes(
+                self._current_notes_activity,
+                self.notes_edit.toPlainText().strip(),
+            )
+
+    @qasync.asyncSlot()
+    async def _save_notes_for_activity(self, activity: str | None, text: str) -> None:
+        """Save notes for a specific activity (captures values before async gap)."""
+        if activity:
+            await self._do_save_notes(activity, text)
+
+    async def _do_save_notes(self, activity: str, text: str) -> None:
+        """Write notes to the local cache dict and repository."""
+        repo = self._context.activity_notes_repo
+        if not repo:
+            return
+
+        if text:
+            self._activity_notes[activity] = text
+            await repo.save(activity, text)
+        else:
+            self._activity_notes.pop(activity, None)
+            await repo.delete(activity)
 
     def _on_row_double_clicked(self, row: int, column: int) -> None:
         """Handle double-click on a row to navigate to filtered transactions."""

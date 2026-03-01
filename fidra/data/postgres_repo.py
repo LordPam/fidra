@@ -12,6 +12,7 @@ from uuid import UUID
 import asyncpg
 
 from fidra.data.repository import (
+    ActivityNotesRepository,
     AttachmentRepository,
     AuditRepository,
     CategoryRepository,
@@ -800,4 +801,65 @@ class PostgresCategoryRepository(CategoryRepository):
                     await conn.execute(
                         "INSERT INTO categories (type, name, sort_order) VALUES ($1, $2, $3)",
                         type, name, i,
+                    )
+
+
+class PostgresActivityNotesRepository(ActivityNotesRepository):
+    """PostgreSQL implementation of ActivityNotesRepository."""
+
+    def __init__(self, pool_or_connection: Union[asyncpg.Pool, "CloudConnection"]):
+        self._pool_or_connection = pool_or_connection
+
+    @property
+    def _pool(self) -> asyncpg.Pool:
+        if hasattr(self._pool_or_connection, 'pool'):
+            return self._pool_or_connection.pool
+        return self._pool_or_connection
+
+    async def ensure_table(self) -> None:
+        """Ensure the activity_notes table exists."""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS activity_notes (
+                    activity TEXT PRIMARY KEY,
+                    notes TEXT NOT NULL
+                )
+            """)
+
+    async def get_all(self) -> dict[str, str]:
+        """Get all activity notes."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT activity, notes FROM activity_notes ORDER BY activity"
+            )
+            return {row["activity"]: row["notes"] for row in rows}
+
+    async def save(self, activity: str, notes: str) -> None:
+        """Save notes for an activity."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO activity_notes (activity, notes) VALUES ($1, $2)
+                ON CONFLICT (activity) DO UPDATE SET notes = EXCLUDED.notes
+                """,
+                activity, notes,
+            )
+
+    async def delete(self, activity: str) -> None:
+        """Delete notes for an activity."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM activity_notes WHERE activity = $1",
+                activity,
+            )
+
+    async def set_all(self, notes: dict[str, str]) -> None:
+        """Replace all activity notes atomically."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM activity_notes")
+                for activity, text in notes.items():
+                    await conn.execute(
+                        "INSERT INTO activity_notes (activity, notes) VALUES ($1, $2)",
+                        activity, text,
                     )

@@ -23,6 +23,7 @@ from fidra.domain.models import Transaction, PlannedTemplate, Sheet
 if TYPE_CHECKING:
     from fidra.data.sync_queue import SyncQueue
     from fidra.data.caching_repository import (
+        CachingActivityNotesRepository,
         CachingTransactionRepository,
         CachingPlannedRepository,
         CachingSheetRepository,
@@ -71,6 +72,7 @@ class SyncService(QObject):
         sheet_repo: "CachingSheetRepository",
         category_repo: "CachingCategoryRepository",
         connection_state: "ConnectionStateService",
+        activity_notes_repo: Optional["CachingActivityNotesRepository"] = None,
         conflict_strategy: ConflictStrategy = ConflictStrategy.LAST_WRITE_WINS,
         sync_interval_ms: int = 30000,  # 30s safety net (event-driven handles fast path)
         parent: Optional[QObject] = None,
@@ -84,6 +86,7 @@ class SyncService(QObject):
             sheet_repo: Caching sheet repository
             category_repo: Caching category repository
             connection_state: Connection state service
+            activity_notes_repo: Caching activity notes repository
             conflict_strategy: How to handle conflicts
             sync_interval_ms: Interval between sync attempts (ms)
             parent: Qt parent
@@ -94,6 +97,7 @@ class SyncService(QObject):
         self._planned_repo = planned_repo
         self._sheet_repo = sheet_repo
         self._category_repo = category_repo
+        self._activity_notes_repo = activity_notes_repo
         self._connection_state = connection_state
         self._conflict_strategy = conflict_strategy
         self._sync_interval = sync_interval_ms
@@ -303,6 +307,8 @@ class SyncService(QObject):
             await self._sync_sheet(change)
         elif change.entity_type == "category":
             await self._sync_category(change)
+        elif change.entity_type == "activity_note":
+            await self._sync_activity_note(change)
         else:
             logger.warning(f"Unknown entity type: {change.entity_type}")
 
@@ -379,6 +385,25 @@ class SyncService(QObject):
             await self._category_repo._cloud.set_all(type_, names)
             # Update local cache to match merged result
             await self._category_repo._local.set_all(type_, names)
+
+    async def _sync_activity_note(self, change: PendingChange) -> None:
+        """Sync an activity note change.
+
+        Idempotent: save upserts, delete of non-existent row is a no-op.
+        """
+        if not self._activity_notes_repo:
+            logger.warning("Activity notes repo not available for sync")
+            return
+
+        data = json.loads(change.payload)
+        action = data.get("action")
+        activity = data.get("activity")
+
+        if action == "save":
+            notes = data.get("notes", "")
+            await self._activity_notes_repo._cloud.save(activity, notes)
+        elif action == "delete":
+            await self._activity_notes_repo._cloud.delete(activity)
 
     async def _handle_sync_error(self, change: PendingChange, error: Exception) -> None:
         """Handle an error during sync.

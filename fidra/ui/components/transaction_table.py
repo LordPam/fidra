@@ -198,6 +198,13 @@ class TransactionTable(QTableView):
 
         return transactions
 
+    def mousePressEvent(self, event) -> None:
+        """Clear selection when clicking empty space."""
+        index = self.indexAt(event.pos())
+        if not index.isValid():
+            self.clearSelection()
+        super().mousePressEvent(event)
+
     def _on_double_click(self, index) -> None:
         """Handle double-click to edit transaction.
 

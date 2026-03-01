@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 from fidra.data.factory import create_repositories
 from fidra.data.repository import (
+    ActivityNotesRepository,
     AttachmentRepository,
     AuditRepository,
     CategoryRepository,
@@ -93,6 +94,7 @@ class ApplicationContext:
         self.audit_repo: Optional[AuditRepository] = None
         self.attachment_repo: Optional[AttachmentRepository] = None
         self.category_repo: Optional[CategoryRepository] = None
+        self.activity_notes_repo: Optional[ActivityNotesRepository] = None
 
         # Services
         self.attachment_service: Optional[Union[AttachmentService, "CloudAttachmentService"]] = None
@@ -145,7 +147,7 @@ class ApplicationContext:
             (
                 self.transaction_repo, self.planned_repo, self.sheet_repo,
                 self.audit_repo, self.attachment_repo, self.category_repo,
-                self.sync_queue,
+                self.activity_notes_repo, self.sync_queue,
             ) = await create_repositories(
                 backend,
                 cloud_connection=self._cloud_connection,
@@ -162,6 +164,9 @@ class ApplicationContext:
             # Migrate categories from settings to database if empty
             await self._migrate_categories_to_db()
 
+            # Migrate activity notes from settings to database if empty
+            await self._migrate_activity_notes_to_db()
+
             # Create cloud attachment service
             user = self.settings.profile.initials or self.settings.profile.name or "System"
             self.audit_service = AuditService(
@@ -175,11 +180,14 @@ class ApplicationContext:
             (
                 self.transaction_repo, self.planned_repo, self.sheet_repo,
                 self.audit_repo, self.attachment_repo, self.category_repo,
-                _,  # No sync queue for SQLite
+                self.activity_notes_repo, _,  # No sync queue for SQLite
             ) = await create_repositories(backend, self._db_path)
 
             # Migrate categories from settings to database if empty
             await self._migrate_categories_to_db()
+
+            # Migrate activity notes from settings to database if empty
+            await self._migrate_activity_notes_to_db()
 
             # Create local attachment service
             user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -211,6 +219,7 @@ class ApplicationContext:
             sheet_repo=self.sheet_repo,
             category_repo=self.category_repo,
             connection_state=self.connection_state,
+            activity_notes_repo=self.activity_notes_repo,
             conflict_strategy=strategy,
             sync_interval_ms=sync_settings.sync_interval_seconds * 1000,
         )
@@ -309,6 +318,8 @@ class ApplicationContext:
                     await self.sheet_repo.refresh_from_cloud()
                 if "categories" in changed_tables and hasattr(self.category_repo, 'refresh_from_cloud'):
                     await self.category_repo.refresh_from_cloud()
+                if "activity_notes" in changed_tables and hasattr(self.activity_notes_repo, 'refresh_from_cloud'):
+                    await self.activity_notes_repo.refresh_from_cloud()
 
                 # Reload state from refreshed caches
                 await self._load_initial_data()
@@ -352,6 +363,8 @@ class ApplicationContext:
             self.sheet_repo._local._conn = new_conn
         if hasattr(self.category_repo, '_local'):
             self.category_repo._local._conn = new_conn
+        if hasattr(self.activity_notes_repo, '_local'):
+            self.activity_notes_repo._local._conn = new_conn
 
         print("[CACHE] Local cache connection reconnected")
 
@@ -367,6 +380,8 @@ class ApplicationContext:
                 await self.planned_repo.refresh_from_cloud()
                 await self.sheet_repo.refresh_from_cloud()
                 await self.category_repo.refresh_from_cloud()
+                if hasattr(self.activity_notes_repo, 'refresh_from_cloud'):
+                    await self.activity_notes_repo.refresh_from_cloud()
                 print("[CACHE] Cache refresh complete")
             except Exception as e:
                 print(f"[CACHE] Cache refresh failed: {e}")
@@ -497,11 +512,12 @@ class ApplicationContext:
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
             self.audit_repo, self.attachment_repo, self.category_repo,
-            _,  # No sync queue for SQLite
+            self.activity_notes_repo, _,  # No sync queue for SQLite
         ) = await create_repositories("sqlite", self._db_path)
 
         # Migrate categories from settings to database if empty
         await self._migrate_categories_to_db()
+        await self._migrate_activity_notes_to_db()
 
         # Recreate services with new repos
         user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -568,7 +584,7 @@ class ApplicationContext:
         (
             self.transaction_repo, self.planned_repo, self.sheet_repo,
             self.audit_repo, self.attachment_repo, self.category_repo,
-            self.sync_queue,
+            self.activity_notes_repo, self.sync_queue,
         ) = await create_repositories(
             "cloud",
             cloud_connection=self._cloud_connection,
@@ -584,6 +600,7 @@ class ApplicationContext:
 
         # Migrate categories from settings to database if empty
         await self._migrate_categories_to_db()
+        await self._migrate_activity_notes_to_db()
 
         # Recreate services
         user = self.settings.profile.initials or self.settings.profile.name or "System"
@@ -662,6 +679,36 @@ class ApplicationContext:
 
         if settings_expense:
             await self.category_repo.set_all("expense", settings_expense)
+
+    async def _migrate_activity_notes_to_db(self) -> None:
+        """Migrate activity notes from settings JSON to database if database is empty.
+
+        Reads the raw JSON file to find activity_notes that were stripped
+        during settings migration (the field no longer exists on AppSettings).
+        """
+        if not self.activity_notes_repo:
+            return
+
+        # Check if database already has notes
+        existing_notes = await self.activity_notes_repo.get_all()
+        if existing_notes:
+            return
+
+        # Read raw JSON to find old activity_notes before they were stripped
+        import json
+        settings_path = self.settings_store.path
+        if not settings_path.exists():
+            return
+
+        try:
+            raw = json.loads(settings_path.read_text())
+            notes = raw.get("activity_notes")
+            if notes and isinstance(notes, dict):
+                for activity, text in notes.items():
+                    if text and text.strip():
+                        await self.activity_notes_repo.save(activity, text.strip())
+        except Exception:
+            pass
 
     async def get_categories(self, type: str) -> list[str]:
         """Get categories for a transaction type.

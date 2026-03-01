@@ -282,6 +282,32 @@ class SyncQueue:
         )
         await self.enqueue(change)
 
+    async def enqueue_activity_note_save(self, activity: str, notes: str) -> None:
+        """Queue an activity note save operation."""
+        change = PendingChange(
+            id=uuid4(),
+            entity_type="activity_note",
+            entity_id=uuid4(),  # Activity notes use name as key, use placeholder UUID
+            operation=SyncOperation.UPDATE,
+            payload=json.dumps({"activity": activity, "notes": notes, "action": "save"}),
+            local_version=1,
+            created_at=datetime.now(),
+        )
+        await self.enqueue(change)
+
+    async def enqueue_activity_note_delete(self, activity: str) -> None:
+        """Queue an activity note delete operation."""
+        change = PendingChange(
+            id=uuid4(),
+            entity_type="activity_note",
+            entity_id=uuid4(),
+            operation=SyncOperation.DELETE,
+            payload=json.dumps({"activity": activity, "action": "delete"}),
+            local_version=1,
+            created_at=datetime.now(),
+        )
+        await self.enqueue(change)
+
     async def dequeue(self, id: UUID) -> None:
         """Remove a change from the queue (after successful sync).
 

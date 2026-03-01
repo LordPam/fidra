@@ -9,6 +9,7 @@ from typing import Optional
 from uuid import UUID
 
 from fidra.data.repository import (
+    ActivityNotesRepository,
     AttachmentRepository,
     AuditRepository,
     CategoryRepository,
@@ -145,6 +146,11 @@ class SQLiteTransactionRepository(TransactionRepository):
             );
 
             CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type);
+
+            CREATE TABLE IF NOT EXISTS activity_notes (
+                activity TEXT PRIMARY KEY,
+                notes TEXT NOT NULL
+            );
         """
         )
         await self._conn.commit()
@@ -726,4 +732,60 @@ class SQLiteCategoryRepository(CategoryRepository):
                 (type, name, i),
             )
 
+        await self._conn.commit()
+
+
+class SQLiteActivityNotesRepository(ActivityNotesRepository):
+    """SQLite implementation of ActivityNotesRepository."""
+
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        self._conn: Optional[aiosqlite.Connection] = None
+
+    async def connect(self) -> None:
+        """Connect to database."""
+        self._conn = await aiosqlite.connect(self._db_path)
+        self._conn.row_factory = aiosqlite.Row
+
+    async def close(self) -> None:
+        """Close database connection."""
+        if self._conn:
+            await self._conn.close()
+
+    def set_connection(self, conn: aiosqlite.Connection) -> None:
+        """Share connection from another repository."""
+        self._conn = conn
+
+    async def get_all(self) -> dict[str, str]:
+        """Get all activity notes."""
+        async with self._conn.execute(
+            "SELECT activity, notes FROM activity_notes ORDER BY activity"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return {row["activity"]: row["notes"] for row in rows}
+
+    async def save(self, activity: str, notes: str) -> None:
+        """Save notes for an activity."""
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO activity_notes (activity, notes) VALUES (?, ?)",
+            (activity, notes),
+        )
+        await self._conn.commit()
+
+    async def delete(self, activity: str) -> None:
+        """Delete notes for an activity."""
+        await self._conn.execute(
+            "DELETE FROM activity_notes WHERE activity = ?",
+            (activity,),
+        )
+        await self._conn.commit()
+
+    async def set_all(self, notes: dict[str, str]) -> None:
+        """Replace all activity notes."""
+        await self._conn.execute("DELETE FROM activity_notes")
+        for activity, text in notes.items():
+            await self._conn.execute(
+                "INSERT INTO activity_notes (activity, notes) VALUES (?, ?)",
+                (activity, text),
+            )
         await self._conn.commit()

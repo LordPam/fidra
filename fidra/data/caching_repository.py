@@ -11,6 +11,7 @@ from typing import Optional, TYPE_CHECKING
 from uuid import UUID
 
 from fidra.data.repository import (
+    ActivityNotesRepository,
     TransactionRepository,
     PlannedRepository,
     SheetRepository,
@@ -452,3 +453,65 @@ class CachingCategoryRepository(CategoryRepository):
         await self._local.set_all("income", income_cats)
         await self._local.set_all("expense", expense_cats)
         return len(income_cats) + len(expense_cats)
+
+
+class CachingActivityNotesRepository(ActivityNotesRepository):
+    """Activity notes repository with local SQLite caching."""
+
+    def __init__(
+        self,
+        cloud_repo: ActivityNotesRepository,
+        local_repo: ActivityNotesRepository,
+        sync_queue: Optional["SyncQueue"] = None,
+        connection_state: Optional["ConnectionStateService"] = None,
+    ):
+        self._cloud = cloud_repo
+        self._local = local_repo
+        self._sync_queue = sync_queue
+        self._connection_state = connection_state
+        self._cache_initialized = False
+
+    async def initialize_cache(self) -> None:
+        """Initialize local cache from cloud data."""
+        if self._cache_initialized:
+            return
+
+        logger.info("Initializing activity notes cache from cloud...")
+        cloud_notes = await self._cloud.get_all()
+        await self._local.set_all(cloud_notes)
+        self._cache_initialized = True
+        logger.info(f"Activity notes cache initialized ({len(cloud_notes)} items)")
+
+    async def get_all(self) -> dict[str, str]:
+        return await self._local.get_all()
+
+    async def save(self, activity: str, notes: str) -> None:
+        await self._local.save(activity, notes)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_activity_note_save(activity, notes)
+
+    async def delete(self, activity: str) -> None:
+        await self._local.delete(activity)
+        if self._sync_queue:
+            await self._sync_queue.enqueue_activity_note_delete(activity)
+
+    async def set_all(self, notes: dict[str, str]) -> None:
+        await self._local.set_all(notes)
+
+    async def close(self) -> None:
+        await self._local.close()
+
+    def set_connection(self, conn) -> None:
+        """Set connection for local repo."""
+        self._local.set_connection(conn)
+
+    async def refresh_from_cloud(self) -> int:
+        if self._sync_queue:
+            has_pending = await self._sync_queue.has_pending_for_type("activity_note")
+            if has_pending:
+                logger.debug("Skipping activity notes refresh — pending local changes")
+                return 0
+
+        cloud_notes = await self._cloud.get_all()
+        await self._local.set_all(cloud_notes)
+        return len(cloud_notes)

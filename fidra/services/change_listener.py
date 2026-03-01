@@ -60,7 +60,7 @@ END $$;
 """
 
 # Tables that are synced and should be watched for changes
-WATCHED_TABLES = ("transactions", "planned_templates", "sheets", "categories")
+WATCHED_TABLES = ("transactions", "planned_templates", "sheets", "categories", "activity_notes")
 
 
 def _get_direct_dsn(dsn: str) -> str:
@@ -331,6 +331,7 @@ class ChangeListener(QObject):
                 "planned_templates": "SELECT MAX(created_at)::text FROM planned_templates",
                 "sheets": "SELECT MAX(created_at)::text FROM sheets",
                 "categories": "SELECT COUNT(*)::text FROM categories",
+                "activity_notes": "SELECT COUNT(*)::text FROM activity_notes",
             }
             for table, query in queries.items():
                 try:

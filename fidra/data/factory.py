@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Tuple, TYPE_CHECKING
 
 from fidra.data.repository import (
+    ActivityNotesRepository,
     AttachmentRepository,
     AuditRepository,
     CategoryRepository,
@@ -12,6 +13,7 @@ from fidra.data.repository import (
     TransactionRepository,
 )
 from fidra.data.sqlite_repo import (
+    SQLiteActivityNotesRepository,
     SQLiteAttachmentRepository,
     SQLiteAuditRepository,
     SQLiteCategoryRepository,
@@ -37,7 +39,7 @@ async def create_repositories(
 ) -> Tuple[
     TransactionRepository, PlannedRepository, SheetRepository,
     AuditRepository, AttachmentRepository, CategoryRepository,
-    Optional["SyncQueue"],
+    ActivityNotesRepository, Optional["SyncQueue"],
 ]:
     """Factory function to create appropriate repositories.
 
@@ -52,7 +54,7 @@ async def create_repositories(
     Returns:
         Tuple of (TransactionRepository, PlannedRepository, SheetRepository,
                   AuditRepository, AttachmentRepository, CategoryRepository,
-                  SyncQueue or None)
+                  ActivityNotesRepository, SyncQueue or None)
 
     Raises:
         ValueError: If backend is unknown or required params missing
@@ -61,12 +63,12 @@ async def create_repositories(
     Example:
         >>> # SQLite (no sync queue)
         >>> repos = await create_repositories("sqlite", Path("fidra.db"))
-        >>> trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, _ = repos
+        >>> trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, notes_repo, _ = repos
         >>> # Cloud PostgreSQL with caching
         >>> conn = CloudConnection(server_config)
         >>> await conn.connect()
         >>> repos = await create_repositories("cloud", cloud_connection=conn)
-        >>> trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, sync_queue = repos
+        >>> trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, notes_repo, sync_queue = repos
     """
     if backend == "sqlite":
         if not file_path:
@@ -85,14 +87,17 @@ async def create_repositories(
         attachment_repo = SQLiteAttachmentRepository(trans_repo._conn)
         category_repo = SQLiteCategoryRepository(file_path)
         category_repo.set_connection(trans_repo._conn)
+        activity_notes_repo = SQLiteActivityNotesRepository(file_path)
+        activity_notes_repo.set_connection(trans_repo._conn)
 
-        return trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, None
+        return trans_repo, planned_repo, sheet_repo, audit_repo, attachment_repo, category_repo, activity_notes_repo, None
 
     elif backend == "cloud":
         if not cloud_connection:
             raise ValueError("cloud_connection required for cloud backend")
 
         from fidra.data.postgres_repo import (
+            PostgresActivityNotesRepository,
             PostgresAttachmentRepository,
             PostgresAuditRepository,
             PostgresCategoryRepository,
@@ -109,16 +114,18 @@ async def create_repositories(
         cloud_audit_repo = PostgresAuditRepository(cloud_connection)
         cloud_attachment_repo = PostgresAttachmentRepository(cloud_connection)
         cloud_category_repo = PostgresCategoryRepository(cloud_connection)
+        cloud_activity_notes_repo = PostgresActivityNotesRepository(cloud_connection)
 
-        # Ensure categories table exists
+        # Ensure tables exist
         await cloud_category_repo.ensure_table()
+        await cloud_activity_notes_repo.ensure_table()
 
         if not enable_caching:
             # Return cloud repos directly without caching
             return (
                 cloud_trans_repo, cloud_planned_repo, cloud_sheet_repo,
                 cloud_audit_repo, cloud_attachment_repo, cloud_category_repo,
-                None
+                cloud_activity_notes_repo, None
             )
 
         # Set up local cache directory
@@ -159,9 +166,12 @@ async def create_repositories(
         local_sheet_repo = SQLiteSheetRepository(local_trans_repo._conn)
         local_category_repo = SQLiteCategoryRepository(cache_db_path)
         local_category_repo.set_connection(local_trans_repo._conn)
+        local_activity_notes_repo = SQLiteActivityNotesRepository(cache_db_path)
+        local_activity_notes_repo.set_connection(local_trans_repo._conn)
 
         # Create caching repository wrappers
         from fidra.data.caching_repository import (
+            CachingActivityNotesRepository,
             CachingTransactionRepository,
             CachingPlannedRepository,
             CachingSheetRepository,
@@ -180,6 +190,9 @@ async def create_repositories(
         category_repo = CachingCategoryRepository(
             cloud_category_repo, local_category_repo, sync_queue, connection_state
         )
+        activity_notes_repo = CachingActivityNotesRepository(
+            cloud_activity_notes_repo, local_activity_notes_repo, sync_queue, connection_state
+        )
 
         # Initialize caches from cloud data
         # Skip if we have pending changes - we'll sync first then refresh
@@ -188,12 +201,14 @@ async def create_repositories(
             await planned_repo.initialize_cache()
             await sheet_repo.initialize_cache()
             await category_repo.initialize_cache()
+            await activity_notes_repo.initialize_cache()
         else:
             # Mark caches as initialized so they read from local
             trans_repo._cache_initialized = True
             planned_repo._cache_initialized = True
             sheet_repo._cache_initialized = True
             category_repo._cache_initialized = True
+            activity_notes_repo._cache_initialized = True
             logger.info("Using existing cache - will sync pending changes before refreshing")
 
         # Audit and attachment repos don't need local caching
@@ -204,7 +219,7 @@ async def create_repositories(
         return (
             trans_repo, planned_repo, sheet_repo,
             audit_repo, attachment_repo, category_repo,
-            sync_queue
+            activity_notes_repo, sync_queue
         )
 
     else:

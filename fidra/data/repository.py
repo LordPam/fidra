@@ -348,6 +348,47 @@ class CategoryRepository(ABC):
         ...
 
 
+class ActivityNotesRepository(ABC):
+    """Abstract interface for activity notes storage."""
+
+    @abstractmethod
+    async def get_all(self) -> dict[str, str]:
+        """Get all activity notes.
+
+        Returns:
+            Dict mapping activity name to notes text
+        """
+        ...
+
+    @abstractmethod
+    async def save(self, activity: str, notes: str) -> None:
+        """Save notes for an activity.
+
+        Args:
+            activity: Activity name
+            notes: Notes text
+        """
+        ...
+
+    @abstractmethod
+    async def delete(self, activity: str) -> None:
+        """Delete notes for an activity.
+
+        Args:
+            activity: Activity name
+        """
+        ...
+
+    @abstractmethod
+    async def set_all(self, notes: dict[str, str]) -> None:
+        """Replace all activity notes (bulk, for cache init).
+
+        Args:
+            notes: Dict mapping activity name to notes text
+        """
+        ...
+
+
 class ConcurrencyError(Exception):
     """Raised when a version conflict is detected during save."""
 
