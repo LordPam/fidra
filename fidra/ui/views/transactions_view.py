@@ -6,7 +6,7 @@ from datetime import date, timedelta
 import asyncio
 
 import qasync
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QPropertyAnimation, QVariantAnimation, QEasingCurve
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -214,13 +214,15 @@ class TransactionsView(QWidget):
         content_layout.setContentsMargins(24, 16, 24, 24)
         content_layout.setSpacing(16)
 
-        # Left panel: Add form in a card (collapsible)
-        self._form_panel_width = 280
+        # Left panel: Add form in a card (collapsible, resizable via splitter)
+        self._form_panel_min_width = 280
+        self._form_panel_max_width = 420
         self._form_panel_visible = True
 
         self.form_card = QFrame()
         self.form_card.setObjectName("form_card")
-        self.form_card.setFixedWidth(self._form_panel_width)
+        self.form_card.setMinimumWidth(self._form_panel_min_width)
+        self.form_card.setMaximumWidth(self._form_panel_max_width)
         form_layout = QVBoxLayout(self.form_card)
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(0)
@@ -231,16 +233,12 @@ class TransactionsView(QWidget):
         )
         form_layout.addWidget(self.add_form)
 
-        content_layout.addWidget(self.form_card)
-
-        # Animation for form panel (animate both min and max width for smooth collapse)
-        self._form_anim_max = QPropertyAnimation(self.form_card, b"maximumWidth")
-        self._form_anim_max.setDuration(200)
-        self._form_anim_max.setEasingCurve(QEasingCurve.InOutQuad)
-
-        self._form_anim_min = QPropertyAnimation(self.form_card, b"minimumWidth")
-        self._form_anim_min.setDuration(200)
-        self._form_anim_min.setEasingCurve(QEasingCurve.InOutQuad)
+        # Animation for form panel collapse/expand (drives splitter sizes)
+        self._form_anim = QVariantAnimation()
+        self._form_anim.setDuration(200)
+        self._form_anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self._form_anim.valueChanged.connect(self._on_form_anim_tick)
+        self._form_anim.finished.connect(self._on_form_anim_finished)
 
         # Center: Transaction table
         table_container = QFrame()
@@ -252,7 +250,15 @@ class TransactionsView(QWidget):
         self.transaction_table = TransactionTable()
         table_layout.addWidget(self.transaction_table)
 
-        content_layout.addWidget(table_container, 1)
+        # Splitter between form and table (allows user to resize form width)
+        self._content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._content_splitter.addWidget(self.form_card)
+        self._content_splitter.addWidget(table_container)
+        self._content_splitter.setCollapsible(0, False)  # form: only collapsible via toggle button
+        self._content_splitter.setCollapsible(1, False)  # table: never collapse
+        self._content_splitter.setStretchFactor(0, 0)    # form: don't stretch
+        self._content_splitter.setStretchFactor(1, 1)    # table: takes remaining space
+        content_layout.addWidget(self._content_splitter, 1)
 
         # Right panel: Balance card
         balance_card = QFrame()
@@ -530,24 +536,41 @@ class TransactionsView(QWidget):
         self._form_panel_visible = not self._form_panel_visible
 
         if self._form_panel_visible:
-            # Show panel - animate from 0 to full width
-            self._form_anim_max.setStartValue(0)
-            self._form_anim_max.setEndValue(self._form_panel_width)
-            self._form_anim_min.setStartValue(0)
-            self._form_anim_min.setEndValue(self._form_panel_width)
+            # Show widget first so splitter includes it, then animate open
+            target = getattr(self, '_form_panel_saved_width', self._form_panel_min_width)
+            self.form_card.setMinimumWidth(0)
+            self.form_card.setMaximumWidth(0)
+            self.form_card.show()
+            self._form_anim.setStartValue(0)
+            self._form_anim.setEndValue(target)
             self.toggle_form_btn.setText("◀")
             self.toggle_form_btn.setToolTip("Hide add transaction form")
         else:
-            # Hide panel - animate from full width to 0
-            self._form_anim_max.setStartValue(self._form_panel_width)
-            self._form_anim_max.setEndValue(0)
-            self._form_anim_min.setStartValue(self._form_panel_width)
-            self._form_anim_min.setEndValue(0)
+            # Remember current width before collapsing
+            self._form_panel_saved_width = self.form_card.width()
+            self._form_anim.setStartValue(self._form_panel_saved_width)
+            self._form_anim.setEndValue(0)
             self.toggle_form_btn.setText("▶")
             self.toggle_form_btn.setToolTip("Show add transaction form")
 
-        self._form_anim_max.start()
-        self._form_anim_min.start()
+        self._form_anim.start()
+
+    def _on_form_anim_tick(self, value: int) -> None:
+        """Update form card size and splitter on each animation frame."""
+        self.form_card.setMinimumWidth(value)
+        self.form_card.setMaximumWidth(max(value, self._form_panel_max_width) if value > 0 else 0)
+        total = self._content_splitter.width()
+        self._content_splitter.setSizes([value, total - value])
+
+    def _on_form_anim_finished(self) -> None:
+        """Finalize form panel state after animation completes."""
+        if self._form_panel_visible:
+            # Restore normal constraints so splitter drag works
+            self.form_card.setMinimumWidth(self._form_panel_min_width)
+            self.form_card.setMaximumWidth(self._form_panel_max_width)
+        else:
+            # Fully hide so splitter reclaims all space cleanly
+            self.form_card.hide()
 
     def _on_show_planned_changed(self) -> None:
         """Handle Show Planned toggle state change."""
@@ -1392,6 +1415,16 @@ class TransactionsView(QWidget):
                     "Edit Planned",
                     "Please select only one planned transaction to edit its template."
                 )
+            return
+
+        # Mixed selection: planned + actual
+        if planned and actual:
+            QMessageBox.information(
+                self,
+                "Mixed Selection",
+                "Your selection includes both actual and planned transactions.\n\n"
+                "Please select only actual transactions or only planned transactions to edit."
+            )
             return
 
         # Edit actual transactions

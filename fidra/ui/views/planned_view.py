@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QDialog,
 )
-from PySide6.QtGui import QShortcut, QKeySequence, QMouseEvent
+from PySide6.QtGui import QShortcut, QKeySequence, QMouseEvent, QPainter, QColor, QPolygonF
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtWidgets import QProxyStyle, QStyleOption
 
 from fidra.ui.models.planned_tree_model import PlannedTreeModel
 from fidra.ui.dialogs.add_planned_dialog import AddPlannedDialog
@@ -30,6 +32,57 @@ from fidra.services.undo import (
 
 if TYPE_CHECKING:
     from fidra.app import ApplicationContext
+
+
+class _TreeIndicatorStyle(QProxyStyle):
+    """Draw branch expand/collapse arrows in a visible colour for both themes."""
+
+    def __init__(self, color: QColor, parent=None):
+        super().__init__(parent)
+        self._color = color
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        from PySide6.QtWidgets import QStyle
+        if element in (
+            QStyle.PrimitiveElement.PE_IndicatorBranch,
+        ):
+            # Only draw if this branch has children (arrow needed)
+            has_children = bool(
+                option.state & QStyle.StateFlag.State_Children
+            )
+            if not has_children:
+                return
+
+            is_open = bool(option.state & QStyle.StateFlag.State_Open)
+            rect = QRectF(option.rect)
+            cx, cy = rect.center().x(), rect.center().y()
+            size = 5.0
+
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(self._color)
+            painter.setPen(Qt.PenStyle.NoPen)
+
+            if is_open:
+                # Down-pointing triangle
+                tri = QPolygonF([
+                    QPointF(cx - size, cy - size * 0.5),
+                    QPointF(cx + size, cy - size * 0.5),
+                    QPointF(cx, cy + size * 0.5),
+                ])
+            else:
+                # Right-pointing triangle
+                tri = QPolygonF([
+                    QPointF(cx - size * 0.5, cy - size),
+                    QPointF(cx + size * 0.5, cy),
+                    QPointF(cx - size * 0.5, cy + size),
+                ])
+
+            painter.drawPolygon(tri)
+            painter.restore()
+            return
+
+        super().drawPrimitive(element, option, painter, widget)
 
 
 class PlannedView(QWidget):
@@ -75,9 +128,16 @@ class PlannedView(QWidget):
         # Tree view for templates with expandable instances
         self.tree = QTreeView()
         self.tree.setAlternatingRowColors(False)
-        self.tree.setAnimated(True)
+        self.tree.setAnimated(False)
         self.tree.setExpandsOnDoubleClick(True)
         self.tree.setRootIsDecorated(True)
+
+        # Custom branch indicators visible in both themes
+        from fidra.ui.theme.engine import get_theme_engine, Theme
+        theme = get_theme_engine()
+        arrow_color = QColor("#64748b") if theme.current_theme == Theme.LIGHT else QColor("#94a3b8")
+        self._tree_style = _TreeIndicatorStyle(arrow_color)
+        self.tree.setStyle(self._tree_style)
 
         # Configure header
         self.tree.header().setStretchLastSection(True)

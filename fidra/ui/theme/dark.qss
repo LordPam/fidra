@@ -465,8 +465,8 @@ QComboBox {
     background-color: #2a2a2a;
     border: 1px solid #404040;
     border-radius: 6px;
-    padding: 6px 10px;
-    padding-right: 28px;
+    padding: 6px 6px;
+    padding-right: 20px;
     color: #e2e8f0;
     font-size: 12px;
     min-height: 16px;
@@ -488,7 +488,7 @@ QComboBox:disabled {
 
 QComboBox::drop-down {
     border: none;
-    width: 28px;
+    width: 18px;
     subcontrol-origin: padding;
     subcontrol-position: right center;
 }
@@ -916,13 +916,16 @@ QProgressBar::chunk {
 }
 
 /* ========== ACTIVITIES TABLE ========== */
-QTableWidget#activities_table::item:hover {
-    background-color: #2e2e2e;
-}
-
 QTableWidget#activities_table::item:selected {
     background-color: rgba(74, 111, 165, 0.25);
     color: #e2e8f0;
+}
+
+/* ========== ACTIVITY NOTES PANEL ========== */
+QFrame#notes_panel {
+    background-color: #2a2a2a;
+    border: 1px solid #333333;
+    border-radius: 10px;
 }
 
 /* ========== LABELS ========== */

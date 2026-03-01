@@ -80,7 +80,8 @@ class ActivitiesView(QWidget):
 
         # Activity notes detail panel
         self.notes_panel = QFrame()
-        self.notes_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        self.notes_panel.setObjectName("notes_panel")
+        self.notes_panel.setFrameShape(QFrame.Shape.NoFrame)
         notes_layout = QVBoxLayout(self.notes_panel)
         notes_layout.setContentsMargins(12, 8, 12, 8)
         notes_layout.setSpacing(4)
@@ -128,6 +129,7 @@ class ActivitiesView(QWidget):
         )
         self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
         self.table.cellClicked.connect(self._on_row_clicked)
+        self.table.currentCellChanged.connect(self._on_current_cell_changed)
         self.notes_edit.textChanged.connect(self._on_notes_text_changed)
 
         # Escape to clear selection and hide notes panel
@@ -333,6 +335,11 @@ class ActivitiesView(QWidget):
         elif net < 0:
             item.setForeground(Qt.GlobalColor.red)
         return item
+
+    def _on_current_cell_changed(self, row: int, col: int, prev_row: int, prev_col: int) -> None:
+        """Handle arrow-key navigation between rows."""
+        if row != prev_row and row >= 0:
+            self._on_row_clicked(row, col)
 
     def _on_row_clicked(self, row: int, column: int) -> None:
         """Handle single-click to show the notes panel for the selected activity."""

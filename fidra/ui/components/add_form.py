@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QCompleter,
     QSizePolicy,
+    QMessageBox,
 )
 
 from fidra.domain.models import Transaction, TransactionType, ApprovalStatus
@@ -152,14 +153,21 @@ class AddTransactionForm(QWidget):
         self.category_input.setEditable(True)
         self.category_input.setPlaceholderText("Category")
         self.category_input.setMinimumHeight(26)
-        self.category_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.category_input.setMinimumWidth(40)
+        self.category_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        # Show start of text when not focused (default scrolls to end)
+        self.category_input.lineEdit().setCursorPosition(0)
+        self.category_input.currentIndexChanged.connect(
+            lambda: self.category_input.lineEdit().setCursorPosition(0)
+        )
         self._update_category_list()
         cat_party_layout.addWidget(self.category_input, 1)
 
         self.party_input = QLineEdit()
         self.party_input.setPlaceholderText("Party")
         self.party_input.setMinimumHeight(26)
-        self.party_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.party_input.setMinimumWidth(40)
+        self.party_input.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         cat_party_layout.addWidget(self.party_input, 1)
 
         layout.addLayout(cat_party_layout)
@@ -274,18 +282,24 @@ class AddTransactionForm(QWidget):
         self.category_input.clear()
         self.category_input.addItems(categories)
 
-        # Restore previous value if it was set
+        # Restore previous value if it was set, otherwise show placeholder
         if current_text:
             index = self.category_input.findText(current_text)
             if index >= 0:
                 self.category_input.setCurrentIndex(index)
             else:
                 self.category_input.setCurrentText(current_text)
+        else:
+            self.category_input.setCurrentIndex(-1)
 
     def _on_submit(self) -> None:
         """Handle form submission."""
         # Validate
         if not self._validate():
+            return
+
+        # Category warning check
+        if not self._check_category():
             return
 
         # Get values
@@ -359,11 +373,53 @@ class AddTransactionForm(QWidget):
 
         return True
 
+    def _check_category(self) -> bool:
+        """Check category and warn if empty, unrecognised, or from wrong type.
+
+        Returns:
+            True to proceed, False to go back and edit.
+        """
+        category = self.category_input.currentText().strip()
+        is_expense = self.expense_btn.isChecked()
+        type_label = "expense" if is_expense else "income"
+
+        # Build the expected list for the current type
+        if self._categories_loaded and self._context:
+            expected = self._expense_categories if is_expense else self._income_categories
+            other = self._income_categories if is_expense else self._expense_categories
+        else:
+            expected = []
+            other = []
+
+        warning = None
+        if not category:
+            warning = "No category selected."
+        elif other and category in other and category not in expected:
+            other_label = "income" if is_expense else "expense"
+            warning = (
+                f'"{category}" is an {other_label} category, '
+                f"but this is an {type_label} transaction."
+            )
+        elif expected and category not in expected:
+            warning = f'"{category}" is not in the {type_label} category list.'
+
+        if warning:
+            reply = QMessageBox.warning(
+                self,
+                "Category",
+                f"{warning}\n\nProceed anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return reply == QMessageBox.Yes
+
+        return True
+
     def _clear_form(self) -> None:
         """Clear all form fields."""
         self.description_input.clear()
         self.amount_input.setValue(0.00)
-        self.category_input.setCurrentIndex(0)
+        self.category_input.setCurrentIndex(-1)
         self.party_input.clear()
         self.reference_input.clear()
         self.activity_input.clear()
