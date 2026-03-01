@@ -416,8 +416,8 @@ QComboBox {
     background-color: #f7f8fa;
     border: 1px solid #d5dbe3;
     border-radius: 6px;
-    padding: 6px 10px;
-    padding-right: 28px;
+    padding: 6px 6px;
+    padding-right: 20px;
     color: #1e293b;
     font-size: 12px;
     min-height: 16px;
@@ -434,7 +434,7 @@ QComboBox:disabled {
 
 QComboBox::drop-down {
     border: none;
-    width: 24px;
+    width: 18px;
     subcontrol-origin: padding;
     subcontrol-position: right center;
 }
@@ -848,13 +848,16 @@ QProgressBar::chunk {
 }
 
 /* ========== ACTIVITIES TABLE ========== */
-QTableWidget#activities_table::item:hover {
-    background-color: #e8ecf1;
-}
-
 QTableWidget#activities_table::item:selected {
     background-color: #dbeafe;
     color: #1e293b;
+}
+
+/* ========== ACTIVITY NOTES PANEL ========== */
+QFrame#notes_panel {
+    background-color: #f7f8fa;
+    border: 1px solid #d5dbe3;
+    border-radius: 10px;
 }
 
 /* ========== LABELS ========== */
@@ -1153,6 +1156,10 @@ QLabel#header_stats {
 QFrame#transactions_toolbar {
     background-color: #f7f8fa;
     border-bottom: 1px solid #d5dbe3;
+}
+
+QFrame#transactions_toolbar QWidget {
+    background-color: transparent;
 }
 
 QFrame#toolbar_separator {

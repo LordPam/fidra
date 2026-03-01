@@ -195,7 +195,7 @@ class TransactionTableModel(QAbstractTableModel):
             if is_dark:
                 return QColor(66, 56, 40)  # Dark amber/brown tint
             else:
-                return QColor(255, 243, 224)  # Light amber/orange tint
+                return QColor(245, 214, 168)  # #f5d6a8 - matches dashboard pending
         # Rejected: no background highlight, uses strikethrough + gray text instead
 
         return None
