@@ -539,9 +539,13 @@ class PlannedView(QWidget):
                 )
                 await self._context.undo_stack.execute(composite)
 
-                # Reload templates and transactions
+                # Reload templates and transactions (sheet-aware)
                 await self._reload_templates()
-                transactions = await self._context.transaction_repo.get_all()
+                sheet = self._context.state.current_sheet.value
+                if sheet == "All Sheets":
+                    transactions = await self._context.transaction_repo.get_all(sheet=None)
+                else:
+                    transactions = await self._context.transaction_repo.get_all(sheet=sheet)
                 self._context.state.transactions.set(transactions)
 
                 QMessageBox.information(self, "Success", "Planned transaction converted to actual!")

@@ -166,6 +166,9 @@ class ActivitiesView(QWidget):
         """Recompute and display the activities summary table."""
         transactions = self._context.state.transactions.value
         planned_templates = self._context.state.planned_templates.value
+        current_sheet = self._context.state.current_sheet.value
+        if current_sheet != "All Sheets":
+            planned_templates = [t for t in planned_templates if t.target_sheet == current_sheet]
 
         # Group transactions by activity
         activity_data: dict[str, dict] = defaultdict(

@@ -197,11 +197,11 @@ class ApplicationContext:
             # Start watching the database file for external changes (SQLite only)
             self.file_watcher.start_watching(self._db_path)
 
-        # Load initial data
-        await self._load_initial_data()
-
-        # Restore UI state from settings
+        # Restore UI state first so current_sheet is set before data loads
         self._restore_ui_state()
+
+        # Load initial data (sheet-aware)
+        await self._load_initial_data()
 
     async def _init_sync_service(self) -> None:
         """Initialize the background sync service for cloud mode."""
@@ -387,18 +387,28 @@ class ApplicationContext:
                 print(f"[CACHE] Cache refresh failed: {e}")
 
     async def _load_initial_data(self) -> None:
-        """Load initial data into state."""
-        # Load transactions
-        transactions = await self.transaction_repo.get_all()
+        """Load initial data into state, respecting current sheet selection."""
+        # Determine sheet filter
+        current_sheet = self.state.current_sheet.value
+        sheet_filter = None if current_sheet == "All Sheets" else current_sheet
+
+        # Load sheet-filtered transactions for state
+        transactions = await self.transaction_repo.get_all(sheet=sheet_filter)
         self.state.transactions.set(transactions)
 
         # Load planned templates
         templates = await self.planned_repo.get_all()
         self.state.planned_templates.set(templates)
 
+        # Sync sheets needs ALL transactions to discover sheet names
+        if sheet_filter is not None:
+            all_transactions = await self.transaction_repo.get_all()
+        else:
+            all_transactions = transactions
+
         # Load sheets and sync with transaction sheet names
         sheets = await self.sheet_repo.get_all()
-        sheets = await self._sync_sheets_from_transactions(sheets, transactions)
+        sheets = await self._sync_sheets_from_transactions(sheets, all_transactions)
         self.state.sheets.set(sheets)
 
     async def _sync_sheets_from_transactions(
@@ -611,11 +621,11 @@ class ApplicationContext:
             self.attachment_repo, server_config.storage
         )
 
-        # Reload all data
-        await self._load_initial_data()
-
-        # Restore UI state from settings
+        # Restore UI state first so current_sheet is set before data loads
         self._restore_ui_state()
+
+        # Reload all data (sheet-aware)
+        await self._load_initial_data()
 
         # Save settings
         self.save_settings()

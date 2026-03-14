@@ -646,6 +646,9 @@ class DashboardView(QWidget):
         # Upcoming planned
         self.upcoming_list.clear()
         templates = self._context.state.planned_templates.value
+        current_sheet = self._context.state.current_sheet.value
+        if current_sheet != "All Sheets":
+            templates = [t for t in templates if t.target_sheet == current_sheet]
         horizon = today + timedelta(days=30)
 
         upcoming_instances = []
@@ -766,9 +769,13 @@ class DashboardView(QWidget):
             await self._reload_transactions()
 
     async def _reload_transactions(self) -> None:
-        """Reload all transactions into state."""
+        """Reload transactions for current sheet into state."""
         try:
-            transactions = await self._context.transaction_repo.get_all()
+            sheet = self._context.state.current_sheet.value
+            if sheet == "All Sheets":
+                transactions = await self._context.transaction_repo.get_all(sheet=None)
+            else:
+                transactions = await self._context.transaction_repo.get_all(sheet=sheet)
             self._context.state.transactions.set(transactions)
         except Exception:
             pass
